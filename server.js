@@ -12,9 +12,19 @@ const wss = new WebSocket.Server({ server, maxPayload: 100 * 1024 * 1024 }); // 
 
 const PORT = process.env.PORT || 3000;
 
-// Store connected devices and pending files (in memory)
-const devices = new Map();
-const pendingFiles = new Map();
+// Store sessions, devices, and files
+const sessions = new Map(); // sessionCode -> { devices: Map, files: Map, createdAt }
+const deviceToSession = new Map(); // deviceId -> sessionCode
+
+// Generate a random 6-character session code
+function generateSessionCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed confusing chars like 0,O,1,I
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+}
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
@@ -33,10 +43,13 @@ function getLocalIP() {
     return 'localhost';
 }
 
-// Generate QR code
+// Generate QR code for a session
 app.get('/api/qrcode', async (req, res) => {
     const ip = getLocalIP();
-    const url = `http://${ip}:${PORT}`;
+    const sessionCode = req.query.session || '';
+    const url = sessionCode 
+        ? `http://${ip}:${PORT}?session=${sessionCode}`
+        : `http://${ip}:${PORT}`;
     try {
         const qrDataUrl = await QRCode.toDataURL(url, {
             width: 256,
@@ -55,38 +68,17 @@ app.get('/api/info', (req, res) => {
     res.json({
         ip,
         port: PORT,
-        url: `http://${ip}:${PORT}`,
-        connectedDevices: devices.size
+        url: `http://${ip}:${PORT}`
     });
 });
 
-// Get connected devices
-app.get('/api/devices', (req, res) => {
-    const deviceList = Array.from(devices.values()).map(d => ({
-        id: d.id,
-        name: d.name,
-        type: d.type,
-        connectedAt: d.connectedAt
-    }));
-    res.json(deviceList);
-});
-
-// Get pending files (metadata only)
-app.get('/api/files', (req, res) => {
-    const files = Array.from(pendingFiles.values()).map(f => ({
-        id: f.id,
-        originalName: f.originalName,
-        size: f.size,
-        mimetype: f.mimetype,
-        uploadedAt: f.uploadedAt
-    }));
-    res.json(files);
-});
-
-// Broadcast message to all devices except excluded one
-function broadcastToDevices(message, excludeId = null) {
+// Broadcast message to all devices in a session except excluded one
+function broadcastToSession(sessionCode, message, excludeId = null) {
+    const session = sessions.get(sessionCode);
+    if (!session) return;
+    
     const messageStr = JSON.stringify(message);
-    devices.forEach((device, id) => {
+    session.devices.forEach((device, id) => {
         if (id !== excludeId && device.ws.readyState === WebSocket.OPEN) {
             device.ws.send(messageStr);
         }
@@ -115,16 +107,34 @@ wss.on('connection', (ws, req) => {
     });
 
     ws.on('close', () => {
-        const device = devices.get(deviceId);
-        devices.delete(deviceId);
+        const sessionCode = deviceToSession.get(deviceId);
+        if (sessionCode) {
+            const session = sessions.get(sessionCode);
+            if (session) {
+                session.devices.delete(deviceId);
+                console.log(`Device ${deviceId} left session ${sessionCode}`);
+                
+                // Notify remaining devices in session
+                broadcastToSession(sessionCode, {
+                    type: 'device_left',
+                    deviceId,
+                    totalDevices: session.devices.size
+                });
+                
+                // Clean up empty sessions after 5 minutes
+                if (session.devices.size === 0) {
+                    setTimeout(() => {
+                        const currentSession = sessions.get(sessionCode);
+                        if (currentSession && currentSession.devices.size === 0) {
+                            sessions.delete(sessionCode);
+                            console.log(`Session ${sessionCode} cleaned up (empty)`);
+                        }
+                    }, 5 * 60 * 1000);
+                }
+            }
+        }
+        deviceToSession.delete(deviceId);
         console.log(`Device disconnected: ${deviceId}`);
-        
-        // Notify remaining devices
-        broadcastToDevices({
-            type: 'device_left',
-            deviceId,
-            totalDevices: devices.size
-        });
     });
 
     ws.on('error', (err) => {
@@ -134,36 +144,84 @@ wss.on('connection', (ws, req) => {
 
 function handleJsonMessage(ws, deviceId, message) {
     switch (message.type) {
-        case 'register':
-            // Register device
-            devices.set(deviceId, {
+        case 'create_session': {
+            // Create a new session
+            let sessionCode = generateSessionCode();
+            while (sessions.has(sessionCode)) {
+                sessionCode = generateSessionCode();
+            }
+            
+            sessions.set(sessionCode, {
+                devices: new Map(),
+                files: new Map(),
+                createdAt: new Date().toISOString()
+            });
+            
+            // Register device in session
+            const session = sessions.get(sessionCode);
+            session.devices.set(deviceId, {
                 id: deviceId,
                 ws,
                 name: message.deviceName || 'Unknown Device',
                 type: message.deviceType || 'unknown',
                 connectedAt: new Date().toISOString()
             });
+            deviceToSession.set(deviceId, sessionCode);
             
-            // Send device ID back
             ws.send(JSON.stringify({
-                type: 'registered',
+                type: 'session_created',
+                sessionCode,
                 deviceId,
-                connectedDevices: devices.size
+                connectedDevices: session.devices.size
+            }));
+            
+            console.log(`Session ${sessionCode} created by ${message.deviceName}`);
+            break;
+        }
+
+        case 'join_session': {
+            // Join existing session
+            const sessionCode = message.sessionCode?.toUpperCase();
+            const session = sessions.get(sessionCode);
+            
+            if (!session) {
+                ws.send(JSON.stringify({
+                    type: 'session_error',
+                    error: 'Session not found. Check the code and try again.'
+                }));
+                return;
+            }
+            
+            // Register device in session
+            session.devices.set(deviceId, {
+                id: deviceId,
+                ws,
+                name: message.deviceName || 'Unknown Device',
+                type: message.deviceType || 'unknown',
+                connectedAt: new Date().toISOString()
+            });
+            deviceToSession.set(deviceId, sessionCode);
+            
+            ws.send(JSON.stringify({
+                type: 'session_joined',
+                sessionCode,
+                deviceId,
+                connectedDevices: session.devices.size
             }));
             
             // Notify all devices of new connection
-            broadcastToDevices({
+            broadcastToSession(sessionCode, {
                 type: 'device_joined',
                 device: {
                     id: deviceId,
                     name: message.deviceName,
                     type: message.deviceType
                 },
-                totalDevices: devices.size
+                totalDevices: session.devices.size
             }, deviceId);
             
-            // Send existing pending files metadata to new device
-            const existingFiles = Array.from(pendingFiles.values()).map(f => ({
+            // Send existing files to new device
+            const existingFiles = Array.from(session.files.values()).map(f => ({
                 id: f.id,
                 originalName: f.originalName,
                 size: f.size,
@@ -176,12 +234,21 @@ function handleJsonMessage(ws, deviceId, message) {
                     files: existingFiles
                 }));
             }
+            
+            console.log(`${message.deviceName} joined session ${sessionCode}`);
             break;
+        }
 
-        case 'file_start':
+        case 'file_start': {
             // New file upload starting
+            const sessionCode = deviceToSession.get(deviceId);
+            if (!sessionCode) return;
+            
+            const session = sessions.get(sessionCode);
+            if (!session) return;
+            
             const fileId = uuidv4();
-            pendingFiles.set(fileId, {
+            session.files.set(fileId, {
                 id: fileId,
                 originalName: message.fileName,
                 size: message.fileSize,
@@ -199,17 +266,24 @@ function handleJsonMessage(ws, deviceId, message) {
                 fileName: message.fileName
             }));
             break;
+        }
 
-        case 'file_complete':
+        case 'file_complete': {
             // File upload complete
-            const file = pendingFiles.get(message.fileId);
+            const sessionCode = deviceToSession.get(deviceId);
+            if (!sessionCode) return;
+            
+            const session = sessions.get(sessionCode);
+            if (!session) return;
+            
+            const file = session.files.get(message.fileId);
             if (file) {
                 // Combine all chunks
                 file.data = Buffer.concat(file.chunks);
                 file.chunks = []; // Free chunk memory
                 
-                // Notify all other devices
-                broadcastToDevices({
+                // Notify all other devices in session
+                broadcastToSession(sessionCode, {
                     type: 'new_file',
                     file: {
                         id: file.id,
@@ -226,13 +300,20 @@ function handleJsonMessage(ws, deviceId, message) {
                     fileId: message.fileId
                 }));
                 
-                console.log(`File uploaded: ${file.originalName} (${formatBytes(file.size)})`);
+                console.log(`File uploaded in session ${sessionCode}: ${file.originalName} (${formatBytes(file.size)})`);
             }
             break;
+        }
 
-        case 'request_file':
+        case 'request_file': {
             // Device requesting to download a file
-            const requestedFile = pendingFiles.get(message.fileId);
+            const sessionCode = deviceToSession.get(deviceId);
+            if (!sessionCode) return;
+            
+            const session = sessions.get(sessionCode);
+            if (!session) return;
+            
+            const requestedFile = session.files.get(message.fileId);
             if (requestedFile && requestedFile.data) {
                 // Send file metadata first
                 ws.send(JSON.stringify({
@@ -267,16 +348,24 @@ function handleJsonMessage(ws, deviceId, message) {
                 }));
             }
             break;
+        }
 
-        case 'delete_file':
-            if (pendingFiles.has(message.fileId)) {
-                pendingFiles.delete(message.fileId);
-                broadcastToDevices({
+        case 'delete_file': {
+            const sessionCode = deviceToSession.get(deviceId);
+            if (!sessionCode) return;
+            
+            const session = sessions.get(sessionCode);
+            if (!session) return;
+            
+            if (session.files.has(message.fileId)) {
+                session.files.delete(message.fileId);
+                broadcastToSession(sessionCode, {
                     type: 'file_removed',
                     fileId: message.fileId
                 });
             }
             break;
+        }
 
         case 'ping':
             ws.send(JSON.stringify({ type: 'pong' }));
@@ -285,11 +374,17 @@ function handleJsonMessage(ws, deviceId, message) {
 }
 
 function handleBinaryMessage(ws, deviceId, data) {
+    const sessionCode = deviceToSession.get(deviceId);
+    if (!sessionCode) return;
+    
+    const session = sessions.get(sessionCode);
+    if (!session) return;
+    
     // First 36 bytes are the file ID
     const fileId = data.slice(0, 36).toString();
     const chunk = data.slice(36);
     
-    const file = pendingFiles.get(fileId);
+    const file = session.files.get(fileId);
     if (file) {
         file.chunks.push(chunk);
         file.receivedSize += chunk.length;
@@ -314,15 +409,26 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
-// Clean up old files periodically (files older than 30 minutes)
+// Clean up old sessions and files periodically (files older than 30 minutes)
 setInterval(() => {
     const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
-    pendingFiles.forEach((file, id) => {
-        const uploadTime = new Date(file.uploadedAt).getTime();
-        if (uploadTime < thirtyMinutesAgo) {
-            pendingFiles.delete(id);
-            broadcastToDevices({ type: 'file_removed', fileId: id });
-            console.log(`Cleaned up old file: ${file.originalName}`);
+    
+    sessions.forEach((session, sessionCode) => {
+        // Clean up old files in session
+        session.files.forEach((file, fileId) => {
+            const uploadTime = new Date(file.uploadedAt).getTime();
+            if (uploadTime < thirtyMinutesAgo) {
+                session.files.delete(fileId);
+                broadcastToSession(sessionCode, { type: 'file_removed', fileId });
+                console.log(`Cleaned up old file: ${file.originalName}`);
+            }
+        });
+        
+        // Clean up old empty sessions
+        const sessionTime = new Date(session.createdAt).getTime();
+        if (session.devices.size === 0 && sessionTime < thirtyMinutesAgo) {
+            sessions.delete(sessionCode);
+            console.log(`Cleaned up old session: ${sessionCode}`);
         }
     });
 }, 5 * 60 * 1000); // Check every 5 minutes

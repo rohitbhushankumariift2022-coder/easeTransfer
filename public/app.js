@@ -3,6 +3,7 @@ class EaseTransfer {
     constructor() {
         this.ws = null;
         this.deviceId = null;
+        this.sessionCode = null;
         this.files = new Map();
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
@@ -16,22 +17,36 @@ class EaseTransfer {
         this.setupElements();
         this.setupEventListeners();
         this.setupTheme();
-        this.connectWebSocket();
-        this.loadServerInfo();
         this.detectDeviceType();
+        this.checkUrlForSession();
+        this.connectWebSocket();
+    }
+
+    checkUrlForSession() {
+        // Check if there's a session code in the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionFromUrl = urlParams.get('session');
+        if (sessionFromUrl) {
+            this.pendingSessionCode = sessionFromUrl.toUpperCase();
+        }
     }
 
     setupElements() {
         this.elements = {
+            sessionScreen: document.getElementById('sessionScreen'),
+            mainContent: document.getElementById('mainContent'),
+            createSession: document.getElementById('createSession'),
+            joinSession: document.getElementById('joinSession'),
+            sessionCodeInput: document.getElementById('sessionCodeInput'),
+            sessionCode: document.getElementById('sessionCode'),
+            copyCode: document.getElementById('copyCode'),
             connectionStatus: document.getElementById('connectionStatus'),
             statusDot: document.querySelector('.status-dot'),
             statusText: document.querySelector('.status-text'),
-            networkUrl: document.getElementById('networkUrl'),
             deviceCount: document.getElementById('deviceCount'),
             toggleQR: document.getElementById('toggleQR'),
             qrContainer: document.getElementById('qrContainer'),
             qrCode: document.getElementById('qrCode'),
-            copyUrl: document.getElementById('copyUrl'),
             uploadZone: document.getElementById('uploadZone'),
             fileInput: document.getElementById('fileInput'),
             uploadProgress: document.getElementById('uploadProgress'),
@@ -82,13 +97,26 @@ class EaseTransfer {
         // Theme Toggle
         this.elements.themeToggle.addEventListener('click', () => this.toggleTheme());
 
+        // Session buttons
+        this.elements.createSession.addEventListener('click', () => this.createSession());
+        this.elements.joinSession.addEventListener('click', () => this.joinSession());
+        this.elements.sessionCodeInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.joinSession();
+        });
+        this.elements.sessionCodeInput.addEventListener('input', (e) => {
+            e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        });
+
+        // Copy session code
+        this.elements.copyCode.addEventListener('click', () => this.copySessionCode());
+
         // QR Toggle
         this.elements.toggleQR.addEventListener('click', () => {
             this.elements.qrContainer.classList.toggle('show');
+            if (this.elements.qrContainer.classList.contains('show')) {
+                this.loadQRCode();
+            }
         });
-
-        // Copy URL
-        this.elements.copyUrl.addEventListener('click', () => this.copyUrl());
 
         // File Upload
         this.elements.uploadZone.addEventListener('dragover', (e) => {
@@ -165,6 +193,64 @@ class EaseTransfer {
         }
     }
 
+    createSession() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'create_session',
+                deviceName: this.deviceName,
+                deviceType: this.deviceType
+            }));
+        }
+    }
+
+    joinSession() {
+        const code = this.elements.sessionCodeInput.value.trim().toUpperCase();
+        if (code.length !== 6) {
+            this.showToast('Please enter a 6-character code', 'error');
+            return;
+        }
+        
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'join_session',
+                sessionCode: code,
+                deviceName: this.deviceName,
+                deviceType: this.deviceType
+            }));
+        }
+    }
+
+    enterSession(sessionCode) {
+        this.sessionCode = sessionCode;
+        this.elements.sessionCode.textContent = sessionCode;
+        this.elements.sessionScreen.style.display = 'none';
+        this.elements.mainContent.style.display = 'flex';
+        
+        // Update URL without reloading
+        const newUrl = `${window.location.origin}${window.location.pathname}?session=${sessionCode}`;
+        window.history.replaceState({}, '', newUrl);
+    }
+
+    copySessionCode() {
+        if (this.sessionCode) {
+            navigator.clipboard.writeText(this.sessionCode).then(() => {
+                this.showToast('Session code copied!', 'success');
+            }).catch(() => {
+                this.showToast('Failed to copy code', 'error');
+            });
+        }
+    }
+
+    async loadQRCode() {
+        try {
+            const response = await fetch(`/api/qrcode?session=${this.sessionCode || ''}`);
+            const data = await response.json();
+            this.elements.qrCode.src = data.qrCode;
+        } catch (err) {
+            console.error('Failed to load QR code:', err);
+        }
+    }
+
     connectWebSocket() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}`;
@@ -177,11 +263,16 @@ class EaseTransfer {
             this.reconnectAttempts = 0;
             this.updateConnectionStatus('connected');
             
-            this.ws.send(JSON.stringify({
-                type: 'register',
-                deviceName: this.deviceName,
-                deviceType: this.deviceType
-            }));
+            // If we have a pending session code from URL, auto-join
+            if (this.pendingSessionCode) {
+                this.ws.send(JSON.stringify({
+                    type: 'join_session',
+                    sessionCode: this.pendingSessionCode,
+                    deviceName: this.deviceName,
+                    deviceType: this.deviceType
+                }));
+                this.pendingSessionCode = null;
+            }
         };
 
         this.ws.onmessage = (event) => {
@@ -232,9 +323,22 @@ class EaseTransfer {
 
     handleMessage(message) {
         switch (message.type) {
-            case 'registered':
+            case 'session_created':
                 this.deviceId = message.deviceId;
+                this.enterSession(message.sessionCode);
                 this.updateDeviceCount(message.connectedDevices);
+                this.showToast('Session created! Share the code to connect devices.', 'success');
+                break;
+
+            case 'session_joined':
+                this.deviceId = message.deviceId;
+                this.enterSession(message.sessionCode);
+                this.updateDeviceCount(message.connectedDevices);
+                this.showToast('Joined session successfully!', 'success');
+                break;
+
+            case 'session_error':
+                this.showToast(message.error, 'error');
                 break;
 
             case 'device_joined':
@@ -318,24 +422,6 @@ class EaseTransfer {
 
     updateDeviceCount(count) {
         this.elements.deviceCount.textContent = count;
-    }
-
-    async loadServerInfo() {
-        try {
-            const qrResponse = await fetch('/api/qrcode');
-            const qrData = await qrResponse.json();
-            
-            this.elements.qrCode.src = qrData.qrCode;
-            this.elements.networkUrl.textContent = qrData.url;
-            
-            const filesResponse = await fetch('/api/files');
-            const files = await filesResponse.json();
-            files.forEach(f => this.files.set(f.id, f));
-            this.renderFiles();
-            
-        } catch (err) {
-            console.error('Failed to load server info:', err);
-        }
     }
 
     async uploadFiles(fileList) {
@@ -666,15 +752,6 @@ class EaseTransfer {
         this.files.delete(fileId);
         this.renderFiles();
         this.showToast('File removed', 'info');
-    }
-
-    copyUrl() {
-        const url = this.elements.networkUrl.textContent;
-        navigator.clipboard.writeText(url).then(() => {
-            this.showToast('URL copied!', 'success');
-        }).catch(() => {
-            this.showToast('Failed to copy URL', 'error');
-        });
     }
 
     showToast(message, type = 'info') {

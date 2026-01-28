@@ -48,16 +48,62 @@
             </div>
         </header>
 
+        <!-- Session Screen -->
+        <div class="session-screen" id="sessionScreen">
+            <div class="session-card">
+                <div class="session-logo">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </svg>
+                    <h1>easeTransfer</h1>
+                </div>
+                <p class="session-subtitle">Create or join a session to share files securely</p>
+                
+                <div class="session-actions">
+                    <button class="session-btn primary" id="createSession">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="8" x2="12" y2="16"/>
+                            <line x1="8" y1="12" x2="16" y2="12"/>
+                        </svg>
+                        Create New Session
+                    </button>
+                    
+                    <div class="session-divider">
+                        <span>or</span>
+                    </div>
+                    
+                    <div class="session-join">
+                        <input type="text" id="sessionCodeInput" class="session-input" 
+                               placeholder="Enter 6-digit code" maxlength="6" 
+                               autocomplete="off" autocapitalize="characters">
+                        <button class="session-btn secondary" id="joinSession">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/>
+                                <polyline points="10 17 15 12 10 7"/>
+                                <line x1="15" y1="12" x2="3" y2="12"/>
+                            </svg>
+                            Join Session
+                        </button>
+                    </div>
+                </div>
+                
+                <p class="session-note">Only devices with the same code can see your files</p>
+            </div>
+        </div>
+
         <!-- Main Content -->
-        <main class="main-content">
+        <main class="main-content" id="mainContent" style="display: none;">
             <!-- Connection Card -->
             <section class="card">
                 <div class="card-row">
                     <div class="info-block">
-                        <span class="label">Network</span>
+                        <span class="label">Session Code</span>
                         <div class="value-row">
-                            <span class="value mono" id="networkUrl">Loading...</span>
-                            <button class="btn-icon-sm" id="copyUrl" title="Copy">
+                            <span class="value mono session-code" id="sessionCode">------</span>
+                            <button class="btn-icon-sm" id="copyCode" title="Copy Code">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <rect x="9" y="9" width="13" height="13" rx="2"/>
                                     <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
@@ -67,7 +113,7 @@
                     </div>
                     <div class="info-block">
                         <span class="label">Devices</span>
-                        <span class="value" id="deviceCount">0</span>
+                        <span class="value" id="deviceCount">1</span>
                     </div>
                     <button class="btn-icon" id="toggleQR" title="QR Code">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -80,7 +126,7 @@
                 </div>
                 <div class="qr-container" id="qrContainer">
                     <img id="qrCode" alt="QR Code" />
-                    <p class="qr-hint">Scan to connect</p>
+                    <p class="qr-hint">Scan to join session</p>
                 </div>
             </section>
 
