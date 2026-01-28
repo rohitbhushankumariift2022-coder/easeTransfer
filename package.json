@@ -1,0 +1,28 @@
+{
+  "name": "easetransfer",
+  "version": "1.0.0",
+  "description": "Fast local network file transfer between iPhone and Samsung devices",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "file-transfer",
+    "local-network",
+    "websocket",
+    "mobile"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.16.0",
+    "qrcode": "^1.5.3",
+    "multer": "^1.4.5-lts.1",
+    "uuid": "^9.0.1"
+  }
+}
