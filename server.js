@@ -4,43 +4,20 @@ const WebSocket = require('ws');
 const path = require('path');
 const os = require('os');
 const QRCode = require('qrcode');
-const multer = require('multer');
-const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ server, maxPayload: 100 * 1024 * 1024 }); // 100MB max
 
 const PORT = process.env.PORT || 3000;
 
-// Store connected devices and pending files
+// Store connected devices and pending files (in memory)
 const devices = new Map();
 const pendingFiles = new Map();
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Configure multer for file uploads with larger limits
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, uploadsDir),
-    filename: (req, file, cb) => {
-        const uniqueName = `${Date.now()}-${uuidv4()}-${file.originalname}`;
-        cb(null, uniqueName);
-    }
-});
-
-const upload = multer({
-    storage,
-    limits: { fileSize: 500 * 1024 * 1024 } // 500MB limit
-});
-
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(uploadsDir));
 app.use(express.json());
 
 // Get local IP address
@@ -94,60 +71,16 @@ app.get('/api/devices', (req, res) => {
     res.json(deviceList);
 });
 
-// File upload endpoint
-app.post('/api/upload', upload.array('files', 50), (req, res) => {
-    if (!req.files || req.files.length === 0) {
-        return res.status(400).json({ error: 'No files uploaded' });
-    }
-
-    const targetDeviceId = req.body.targetDevice;
-    const uploaderId = req.body.uploaderId;
-
-    const fileInfos = req.files.map(file => ({
-        id: uuidv4(),
-        originalName: file.originalname,
-        filename: file.filename,
-        size: file.size,
-        mimetype: file.mimetype,
-        uploadedAt: new Date().toISOString(),
-        downloadUrl: `/uploads/${file.filename}`
-    }));
-
-    // Store files and notify connected devices
-    fileInfos.forEach(fileInfo => {
-        pendingFiles.set(fileInfo.id, fileInfo);
-    });
-
-    // Broadcast new files to all connected devices (except uploader)
-    broadcastToDevices({
-        type: 'new_files',
-        files: fileInfos,
-        fromDevice: uploaderId
-    }, uploaderId);
-
-    res.json({ success: true, files: fileInfos });
-});
-
-// Get pending files
+// Get pending files (metadata only)
 app.get('/api/files', (req, res) => {
-    const files = Array.from(pendingFiles.values());
+    const files = Array.from(pendingFiles.values()).map(f => ({
+        id: f.id,
+        originalName: f.originalName,
+        size: f.size,
+        mimetype: f.mimetype,
+        uploadedAt: f.uploadedAt
+    }));
     res.json(files);
-});
-
-// Delete file after download
-app.delete('/api/files/:id', (req, res) => {
-    const fileInfo = pendingFiles.get(req.params.id);
-    if (fileInfo) {
-        const filePath = path.join(uploadsDir, fileInfo.filename);
-        if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-        }
-        pendingFiles.delete(req.params.id);
-        
-        // Notify all devices
-        broadcastToDevices({ type: 'file_removed', fileId: req.params.id });
-    }
-    res.json({ success: true });
 });
 
 // Broadcast message to all devices except excluded one
@@ -166,64 +99,18 @@ wss.on('connection', (ws, req) => {
     
     console.log(`Device connected: ${deviceId}`);
 
-    ws.on('message', (data) => {
+    ws.on('message', (data, isBinary) => {
+        // Handle binary data (file chunks)
+        if (isBinary) {
+            handleBinaryMessage(ws, deviceId, data);
+            return;
+        }
+
         try {
-            const message = JSON.parse(data);
-            
-            switch (message.type) {
-                case 'register':
-                    // Register device
-                    devices.set(deviceId, {
-                        id: deviceId,
-                        ws,
-                        name: message.deviceName || 'Unknown Device',
-                        type: message.deviceType || 'unknown',
-                        connectedAt: new Date().toISOString()
-                    });
-                    
-                    // Send device ID back
-                    ws.send(JSON.stringify({
-                        type: 'registered',
-                        deviceId,
-                        connectedDevices: devices.size
-                    }));
-                    
-                    // Notify all devices of new connection
-                    broadcastToDevices({
-                        type: 'device_joined',
-                        device: {
-                            id: deviceId,
-                            name: message.deviceName,
-                            type: message.deviceType
-                        },
-                        totalDevices: devices.size
-                    }, deviceId);
-                    
-                    // Send existing pending files to new device
-                    const existingFiles = Array.from(pendingFiles.values());
-                    if (existingFiles.length > 0) {
-                        ws.send(JSON.stringify({
-                            type: 'existing_files',
-                            files: existingFiles
-                        }));
-                    }
-                    break;
-
-                case 'ping':
-                    ws.send(JSON.stringify({ type: 'pong' }));
-                    break;
-
-                case 'file_downloaded':
-                    // Notify uploader that file was downloaded
-                    broadcastToDevices({
-                        type: 'file_downloaded',
-                        fileId: message.fileId,
-                        downloadedBy: deviceId
-                    });
-                    break;
-            }
+            const message = JSON.parse(data.toString());
+            handleJsonMessage(ws, deviceId, message);
         } catch (err) {
-            console.error('Error processing message:', err);
+            console.error('Failed to parse message:', err);
         }
     });
 
@@ -245,18 +132,197 @@ wss.on('connection', (ws, req) => {
     });
 });
 
-// Clean up old files periodically (files older than 1 hour)
+function handleJsonMessage(ws, deviceId, message) {
+    switch (message.type) {
+        case 'register':
+            // Register device
+            devices.set(deviceId, {
+                id: deviceId,
+                ws,
+                name: message.deviceName || 'Unknown Device',
+                type: message.deviceType || 'unknown',
+                connectedAt: new Date().toISOString()
+            });
+            
+            // Send device ID back
+            ws.send(JSON.stringify({
+                type: 'registered',
+                deviceId,
+                connectedDevices: devices.size
+            }));
+            
+            // Notify all devices of new connection
+            broadcastToDevices({
+                type: 'device_joined',
+                device: {
+                    id: deviceId,
+                    name: message.deviceName,
+                    type: message.deviceType
+                },
+                totalDevices: devices.size
+            }, deviceId);
+            
+            // Send existing pending files metadata to new device
+            const existingFiles = Array.from(pendingFiles.values()).map(f => ({
+                id: f.id,
+                originalName: f.originalName,
+                size: f.size,
+                mimetype: f.mimetype,
+                uploadedAt: f.uploadedAt
+            }));
+            if (existingFiles.length > 0) {
+                ws.send(JSON.stringify({
+                    type: 'existing_files',
+                    files: existingFiles
+                }));
+            }
+            break;
+
+        case 'file_start':
+            // New file upload starting
+            const fileId = uuidv4();
+            pendingFiles.set(fileId, {
+                id: fileId,
+                originalName: message.fileName,
+                size: message.fileSize,
+                mimetype: message.mimeType,
+                uploadedAt: new Date().toISOString(),
+                chunks: [],
+                receivedSize: 0,
+                uploaderId: deviceId
+            });
+            
+            // Confirm to uploader
+            ws.send(JSON.stringify({
+                type: 'file_start_ack',
+                fileId,
+                fileName: message.fileName
+            }));
+            break;
+
+        case 'file_complete':
+            // File upload complete
+            const file = pendingFiles.get(message.fileId);
+            if (file) {
+                // Combine all chunks
+                file.data = Buffer.concat(file.chunks);
+                file.chunks = []; // Free chunk memory
+                
+                // Notify all other devices
+                broadcastToDevices({
+                    type: 'new_file',
+                    file: {
+                        id: file.id,
+                        originalName: file.originalName,
+                        size: file.size,
+                        mimetype: file.mimetype,
+                        uploadedAt: file.uploadedAt
+                    }
+                }, deviceId);
+                
+                // Confirm to uploader
+                ws.send(JSON.stringify({
+                    type: 'file_complete_ack',
+                    fileId: message.fileId
+                }));
+                
+                console.log(`File uploaded: ${file.originalName} (${formatBytes(file.size)})`);
+            }
+            break;
+
+        case 'request_file':
+            // Device requesting to download a file
+            const requestedFile = pendingFiles.get(message.fileId);
+            if (requestedFile && requestedFile.data) {
+                // Send file metadata first
+                ws.send(JSON.stringify({
+                    type: 'file_download_start',
+                    fileId: requestedFile.id,
+                    fileName: requestedFile.originalName,
+                    fileSize: requestedFile.size,
+                    mimeType: requestedFile.mimetype
+                }));
+                
+                // Send file data in chunks
+                const chunkSize = 64 * 1024; // 64KB chunks
+                const totalChunks = Math.ceil(requestedFile.data.length / chunkSize);
+                
+                for (let i = 0; i < totalChunks; i++) {
+                    const start = i * chunkSize;
+                    const end = Math.min(start + chunkSize, requestedFile.data.length);
+                    const chunk = requestedFile.data.slice(start, end);
+                    
+                    // Send chunk with header
+                    const header = Buffer.alloc(36); // fileId (36 bytes UUID)
+                    header.write(requestedFile.id);
+                    const packet = Buffer.concat([header, chunk]);
+                    
+                    ws.send(packet);
+                }
+                
+                // Send completion
+                ws.send(JSON.stringify({
+                    type: 'file_download_complete',
+                    fileId: requestedFile.id
+                }));
+            }
+            break;
+
+        case 'delete_file':
+            if (pendingFiles.has(message.fileId)) {
+                pendingFiles.delete(message.fileId);
+                broadcastToDevices({
+                    type: 'file_removed',
+                    fileId: message.fileId
+                });
+            }
+            break;
+
+        case 'ping':
+            ws.send(JSON.stringify({ type: 'pong' }));
+            break;
+    }
+}
+
+function handleBinaryMessage(ws, deviceId, data) {
+    // First 36 bytes are the file ID
+    const fileId = data.slice(0, 36).toString();
+    const chunk = data.slice(36);
+    
+    const file = pendingFiles.get(fileId);
+    if (file) {
+        file.chunks.push(chunk);
+        file.receivedSize += chunk.length;
+        
+        // Send progress to uploader
+        const progress = Math.round((file.receivedSize / file.size) * 100);
+        ws.send(JSON.stringify({
+            type: 'upload_progress',
+            fileId,
+            progress,
+            received: file.receivedSize,
+            total: file.size
+        }));
+    }
+}
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// Clean up old files periodically (files older than 30 minutes)
 setInterval(() => {
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
     pendingFiles.forEach((file, id) => {
         const uploadTime = new Date(file.uploadedAt).getTime();
-        if (uploadTime < oneHourAgo) {
-            const filePath = path.join(uploadsDir, file.filename);
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-            }
+        if (uploadTime < thirtyMinutesAgo) {
             pendingFiles.delete(id);
             broadcastToDevices({ type: 'file_removed', fileId: id });
+            console.log(`Cleaned up old file: ${file.originalName}`);
         }
     });
 }, 5 * 60 * 1000); // Check every 5 minutes

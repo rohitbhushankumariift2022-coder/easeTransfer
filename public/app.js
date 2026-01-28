@@ -3,9 +3,11 @@ class EaseTransfer {
     constructor() {
         this.ws = null;
         this.deviceId = null;
-        this.files = [];
+        this.files = new Map();
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
+        this.uploadQueue = [];
+        this.downloading = new Map();
         
         this.init();
     }
@@ -44,7 +46,6 @@ class EaseTransfer {
     }
 
     setupTheme() {
-        // Check for saved theme or system preference
         const savedTheme = localStorage.getItem('theme');
         const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         const theme = savedTheme || (systemDark ? 'dark' : 'light');
@@ -52,7 +53,6 @@ class EaseTransfer {
         document.documentElement.setAttribute('data-theme', theme);
         this.updateThemeColor(theme);
 
-        // Listen for system theme changes
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
             if (!localStorage.getItem('theme')) {
                 const newTheme = e.matches ? 'dark' : 'light';
@@ -154,13 +154,13 @@ class EaseTransfer {
         const wsUrl = `${protocol}//${window.location.host}`;
 
         this.ws = new WebSocket(wsUrl);
+        this.ws.binaryType = 'arraybuffer';
 
         this.ws.onopen = () => {
             console.log('WebSocket connected');
             this.reconnectAttempts = 0;
             this.updateConnectionStatus('connected');
             
-            // Register device
             this.ws.send(JSON.stringify({
                 type: 'register',
                 deviceName: this.deviceName,
@@ -169,6 +169,11 @@ class EaseTransfer {
         };
 
         this.ws.onmessage = (event) => {
+            if (event.data instanceof ArrayBuffer) {
+                this.handleBinaryMessage(event.data);
+                return;
+            }
+            
             try {
                 const message = JSON.parse(event.data);
                 this.handleMessage(message);
@@ -181,7 +186,6 @@ class EaseTransfer {
             console.log('WebSocket disconnected');
             this.updateConnectionStatus('disconnected');
             
-            // Attempt to reconnect
             if (this.reconnectAttempts < this.maxReconnectAttempts) {
                 this.reconnectAttempts++;
                 setTimeout(() => this.connectWebSocket(), 2000 * this.reconnectAttempts);
@@ -191,6 +195,23 @@ class EaseTransfer {
         this.ws.onerror = (error) => {
             console.error('WebSocket error:', error);
         };
+    }
+
+    handleBinaryMessage(data) {
+        // First 36 bytes are fileId
+        const fileIdBytes = new Uint8Array(data.slice(0, 36));
+        const fileId = new TextDecoder().decode(fileIdBytes);
+        const chunk = data.slice(36);
+        
+        const download = this.downloading.get(fileId);
+        if (download) {
+            download.chunks.push(chunk);
+            download.received += chunk.byteLength;
+            
+            // Update progress
+            const progress = Math.round((download.received / download.size) * 100);
+            this.showToast(`Downloading: ${progress}%`, 'info');
+        }
     }
 
     handleMessage(message) {
@@ -209,26 +230,52 @@ class EaseTransfer {
                 this.updateDeviceCount(message.totalDevices);
                 break;
 
-            case 'new_files':
-                this.addFiles(message.files);
-                this.showToast(`${message.files.length} file(s) received!`, 'success');
+            case 'new_file':
+                this.files.set(message.file.id, message.file);
+                this.renderFiles();
+                this.showToast(`New file: ${message.file.originalName}`, 'success');
                 break;
 
             case 'existing_files':
-                this.files = message.files;
+                message.files.forEach(f => this.files.set(f.id, f));
                 this.renderFiles();
                 break;
 
             case 'file_removed':
-                this.removeFile(message.fileId);
+                this.files.delete(message.fileId);
+                this.renderFiles();
                 break;
 
-            case 'file_downloaded':
-                // Could show notification that someone downloaded a file
+            case 'file_start_ack':
+                // Server confirmed file upload start, begin sending chunks
+                this.sendFileChunks(message.fileId, message.fileName);
+                break;
+
+            case 'upload_progress':
+                this.updateProgress(message.progress);
+                break;
+
+            case 'file_complete_ack':
+                this.hideUploadProgress();
+                this.showToast('File uploaded!', 'success');
+                this.processUploadQueue();
+                break;
+
+            case 'file_download_start':
+                this.downloading.set(message.fileId, {
+                    fileName: message.fileName,
+                    size: message.fileSize,
+                    mimeType: message.mimeType,
+                    chunks: [],
+                    received: 0
+                });
+                break;
+
+            case 'file_download_complete':
+                this.completeDownload(message.fileId);
                 break;
 
             case 'pong':
-                // Keep-alive response
                 break;
         }
     }
@@ -258,17 +305,15 @@ class EaseTransfer {
 
     async loadServerInfo() {
         try {
-            // Load QR code
             const qrResponse = await fetch('/api/qrcode');
             const qrData = await qrResponse.json();
             
             this.elements.qrCode.src = qrData.qrCode;
             this.elements.networkUrl.textContent = qrData.url;
             
-            // Load existing files
             const filesResponse = await fetch('/api/files');
             const files = await filesResponse.json();
-            this.files = files;
+            files.forEach(f => this.files.set(f.id, f));
             this.renderFiles();
             
         } catch (err) {
@@ -280,48 +325,91 @@ class EaseTransfer {
         const files = Array.from(fileList);
         if (files.length === 0) return;
 
-        const formData = new FormData();
-        files.forEach(file => formData.append('files', file));
-        formData.append('uploaderId', this.deviceId);
-
-        this.showUploadProgress();
-
-        try {
-            const xhr = new XMLHttpRequest();
-            
-            xhr.upload.onprogress = (e) => {
-                if (e.lengthComputable) {
-                    const percent = Math.round((e.loaded / e.total) * 100);
-                    this.updateProgress(percent);
-                }
-            };
-
-            xhr.onload = () => {
-                this.hideUploadProgress();
-                
-                if (xhr.status === 200) {
-                    const response = JSON.parse(xhr.responseText);
-                    this.addFiles(response.files);
-                    this.showToast(`${files.length} file(s) uploaded successfully!`, 'success');
-                    this.elements.fileInput.value = '';
-                } else {
-                    this.showToast('Upload failed. Please try again.', 'error');
-                }
-            };
-
-            xhr.onerror = () => {
-                this.hideUploadProgress();
-                this.showToast('Upload failed. Please check your connection.', 'error');
-            };
-
-            xhr.open('POST', '/api/upload');
-            xhr.send(formData);
-            
-        } catch (err) {
-            this.hideUploadProgress();
-            this.showToast('Upload failed. Please try again.', 'error');
-            console.error('Upload error:', err);
+        // Add to queue
+        this.uploadQueue.push(...files);
+        
+        // Start processing if not already
+        if (this.uploadQueue.length === files.length) {
+            this.processUploadQueue();
         }
+    }
+
+    processUploadQueue() {
+        if (this.uploadQueue.length === 0) {
+            this.elements.fileInput.value = '';
+            return;
+        }
+
+        const file = this.uploadQueue.shift();
+        this.currentUploadFile = file;
+        
+        this.showUploadProgress();
+        this.updateProgress(0);
+
+        // Tell server we're starting a file upload
+        this.ws.send(JSON.stringify({
+            type: 'file_start',
+            fileName: file.name,
+            fileSize: file.size,
+            mimeType: file.type || 'application/octet-stream'
+        }));
+    }
+
+    async sendFileChunks(fileId, fileName) {
+        const file = this.currentUploadFile;
+        if (!file) return;
+
+        const chunkSize = 64 * 1024; // 64KB chunks
+        const totalChunks = Math.ceil(file.size / chunkSize);
+        
+        for (let i = 0; i < totalChunks; i++) {
+            const start = i * chunkSize;
+            const end = Math.min(start + chunkSize, file.size);
+            const chunk = file.slice(start, end);
+            const chunkData = await chunk.arrayBuffer();
+            
+            // Create packet: fileId (36 bytes) + chunk data
+            const header = new TextEncoder().encode(fileId.padEnd(36));
+            const packet = new Uint8Array(header.length + chunkData.byteLength);
+            packet.set(header, 0);
+            packet.set(new Uint8Array(chunkData), header.length);
+            
+            this.ws.send(packet);
+            
+            // Small delay to prevent overwhelming
+            if (i % 10 === 0) {
+                await new Promise(r => setTimeout(r, 5));
+            }
+        }
+
+        // Tell server upload is complete
+        this.ws.send(JSON.stringify({
+            type: 'file_complete',
+            fileId
+        }));
+    }
+
+    completeDownload(fileId) {
+        const download = this.downloading.get(fileId);
+        if (!download) return;
+
+        // Combine chunks into blob
+        const blob = new Blob(download.chunks.map(c => new Uint8Array(c)), { 
+            type: download.mimeType 
+        });
+        
+        // Trigger download
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = download.fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        this.downloading.delete(fileId);
+        this.showToast('Download complete!', 'success');
     }
 
     showUploadProgress() {
@@ -340,39 +428,28 @@ class EaseTransfer {
         this.elements.progressPercent.textContent = `${percent}%`;
     }
 
-    addFiles(newFiles) {
-        this.files = [...this.files, ...newFiles];
-        this.renderFiles();
-    }
-
-    removeFile(fileId) {
-        this.files = this.files.filter(f => f.id !== fileId);
-        this.renderFiles();
-    }
-
     renderFiles() {
         const { filesList, fileCount, downloadAll } = this.elements;
+        const filesArray = Array.from(this.files.values());
         
-        fileCount.textContent = this.files.length;
-        downloadAll.style.display = this.files.length > 1 ? 'block' : 'none';
+        fileCount.textContent = filesArray.length;
+        downloadAll.style.display = filesArray.length > 1 ? 'block' : 'none';
 
-        if (this.files.length === 0) {
+        if (filesArray.length === 0) {
             filesList.innerHTML = `
                 <div class="empty-state">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                         <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/>
                         <polyline points="13,2 13,9 20,9"/>
                     </svg>
-                    <p>No files shared yet</p>
-                    <span>Upload files to share with connected devices</span>
+                    <p>No files yet</p>
                 </div>
             `;
             return;
         }
 
-        filesList.innerHTML = this.files.map(file => this.createFileItemHTML(file)).join('');
+        filesList.innerHTML = filesArray.map(file => this.createFileItemHTML(file)).join('');
 
-        // Add event listeners for file actions
         filesList.querySelectorAll('.btn-download').forEach(btn => {
             btn.addEventListener('click', () => this.downloadFile(btn.dataset.fileId));
         });
@@ -453,56 +530,40 @@ class EaseTransfer {
     }
 
     async downloadFile(fileId) {
-        const file = this.files.find(f => f.id === fileId);
+        const file = this.files.get(fileId);
         if (!file) return;
 
-        try {
-            // Create a link and trigger download
-            const link = document.createElement('a');
-            link.href = file.downloadUrl;
-            link.download = file.originalName;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+        // Request file from server via WebSocket
+        this.ws.send(JSON.stringify({
+            type: 'request_file',
+            fileId
+        }));
 
-            // Notify server that file was downloaded
-            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                this.ws.send(JSON.stringify({
-                    type: 'file_downloaded',
-                    fileId
-                }));
-            }
-
-            this.showToast('Download started!', 'success');
-        } catch (err) {
-            console.error('Download error:', err);
-            this.showToast('Download failed', 'error');
-        }
+        this.showToast('Starting download...', 'info');
     }
 
     async downloadAllFiles() {
-        for (const file of this.files) {
+        const filesArray = Array.from(this.files.values());
+        for (const file of filesArray) {
             await this.downloadFile(file.id);
-            // Small delay between downloads
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
     }
 
     async deleteFile(fileId) {
-        try {
-            await fetch(`/api/files/${fileId}`, { method: 'DELETE' });
-            this.removeFile(fileId);
-            this.showToast('File removed', 'info');
-        } catch (err) {
-            console.error('Delete error:', err);
-            this.showToast('Failed to remove file', 'error');
-        }
+        this.ws.send(JSON.stringify({
+            type: 'delete_file',
+            fileId
+        }));
+        this.files.delete(fileId);
+        this.renderFiles();
+        this.showToast('File removed', 'info');
     }
 
     copyUrl() {
         const url = this.elements.networkUrl.textContent;
         navigator.clipboard.writeText(url).then(() => {
-            this.showToast('URL copied to clipboard!', 'success');
+            this.showToast('URL copied!', 'success');
         }).catch(() => {
             this.showToast('Failed to copy URL', 'error');
         });
