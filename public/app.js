@@ -118,6 +118,22 @@ class EaseTransfer {
         // Download All
         this.elements.downloadAll.addEventListener('click', () => this.downloadAllFiles());
 
+        // Viewer Modal
+        document.getElementById('viewerClose').addEventListener('click', () => this.closeViewer());
+        document.getElementById('viewerModal').querySelector('.viewer-backdrop').addEventListener('click', () => this.closeViewer());
+        document.getElementById('viewerDownload').addEventListener('click', () => {
+            if (this.currentViewFileId) {
+                this.downloadFile(this.currentViewFileId);
+            }
+        });
+
+        // Escape key to close viewer
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                this.closeViewer();
+            }
+        });
+
         // Visibility change - reconnect when page becomes visible
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible' && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
@@ -267,7 +283,8 @@ class EaseTransfer {
                     size: message.fileSize,
                     mimeType: message.mimeType,
                     chunks: [],
-                    received: 0
+                    received: 0,
+                    forPreview: this.viewMode
                 });
                 break;
 
@@ -398,6 +415,13 @@ class EaseTransfer {
             type: download.mimeType 
         });
         
+        // Check if this is for preview or download
+        if (download.forPreview) {
+            this.showViewer(fileId, blob);
+            this.downloading.delete(fileId);
+            return;
+        }
+
         // Trigger download
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -450,6 +474,10 @@ class EaseTransfer {
 
         filesList.innerHTML = filesArray.map(file => this.createFileItemHTML(file)).join('');
 
+        filesList.querySelectorAll('.btn-view').forEach(btn => {
+            btn.addEventListener('click', () => this.viewFile(btn.dataset.fileId));
+        });
+
         filesList.querySelectorAll('.btn-download').forEach(btn => {
             btn.addEventListener('click', () => this.downloadFile(btn.dataset.fileId));
         });
@@ -463,6 +491,7 @@ class EaseTransfer {
         const fileType = this.getFileType(file.mimetype);
         const fileSize = this.formatFileSize(file.size);
         const iconHTML = this.getFileIconHTML(fileType, file);
+        const canPreview = fileType === 'image' || fileType === 'video';
 
         return `
             <div class="file-item" data-file-id="${file.id}">
@@ -474,13 +503,20 @@ class EaseTransfer {
                     <div class="file-meta">${fileSize}</div>
                 </div>
                 <div class="file-actions">
+                    ${canPreview ? `
+                    <button class="btn-view" data-file-id="${file.id}" title="View">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                    </button>
+                    ` : ''}
                     <button class="btn-download" data-file-id="${file.id}" data-url="${file.downloadUrl}" data-name="${this.escapeHtml(file.originalName)}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
                             <polyline points="7,10 12,15 17,10"/>
                             <line x1="12" y1="15" x2="12" y2="3"/>
                         </svg>
-                        Save
                     </button>
                     <button class="btn-delete" data-file-id="${file.id}" title="Remove">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -529,10 +565,82 @@ class EaseTransfer {
         return div.innerHTML;
     }
 
+    async viewFile(fileId) {
+        const file = this.files.get(fileId);
+        if (!file) return;
+
+        const fileType = this.getFileType(file.mimetype);
+        if (fileType !== 'image' && fileType !== 'video') {
+            this.showToast('Preview not available for this file type', 'info');
+            return;
+        }
+
+        this.currentViewFileId = fileId;
+        
+        // Request file for preview
+        this.viewMode = true;
+        this.ws.send(JSON.stringify({
+            type: 'request_file',
+            fileId,
+            forPreview: true
+        }));
+
+        this.showToast('Loading preview...', 'info');
+    }
+
+    showViewer(fileId, blob) {
+        const file = this.files.get(fileId);
+        if (!file) return;
+
+        const fileType = this.getFileType(file.mimetype);
+        const modal = document.getElementById('viewerModal');
+        const image = document.getElementById('viewerImage');
+        const video = document.getElementById('viewerVideo');
+        const filename = document.getElementById('viewerFilename');
+
+        filename.textContent = file.originalName;
+
+        const url = URL.createObjectURL(blob);
+
+        if (fileType === 'video') {
+            image.style.display = 'none';
+            video.style.display = 'block';
+            video.src = url;
+        } else {
+            video.style.display = 'none';
+            video.src = '';
+            image.style.display = 'block';
+            image.src = url;
+        }
+
+        modal.classList.add('show');
+        document.body.style.overflow = 'hidden';
+
+        // Store for cleanup
+        this.currentViewerUrl = url;
+    }
+
+    closeViewer() {
+        const modal = document.getElementById('viewerModal');
+        const video = document.getElementById('viewerVideo');
+        
+        modal.classList.remove('show');
+        document.body.style.overflow = '';
+        video.pause();
+        video.src = '';
+
+        if (this.currentViewerUrl) {
+            URL.revokeObjectURL(this.currentViewerUrl);
+            this.currentViewerUrl = null;
+        }
+        this.currentViewFileId = null;
+    }
+
     async downloadFile(fileId) {
         const file = this.files.get(fileId);
         if (!file) return;
 
+        this.viewMode = false;
         // Request file from server via WebSocket
         this.ws.send(JSON.stringify({
             type: 'request_file',
