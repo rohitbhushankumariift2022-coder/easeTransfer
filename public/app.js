@@ -838,23 +838,52 @@ class FeedbackSystem {
         }
 
         const feedback = this.feedbackText?.value.trim() || '';
-        const subject = encodeURIComponent(`easeTransfer Feedback - ${this.selectedRating} Stars`);
-        const body = encodeURIComponent(
-            `Rating: ${this.selectedRating}/5 Stars\n\n` +
-            `Feedback:\n${feedback || 'No additional feedback provided'}\n\n` +
-            `---\nSent from easeTransfer`
-        );
+        
+        // Disable button while sending
+        this.submitBtn.disabled = true;
+        this.submitBtn.innerHTML = `
+            <svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="20"/>
+            </svg>
+            Sending...
+        `;
 
-        // Open email client
-        window.location.href = `mailto:rohitbhushankumar.iift2022@gmail.com?subject=${subject}&body=${body}`;
+        try {
+            const response = await fetch('/api/feedback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    rating: this.selectedRating,
+                    feedback: feedback
+                })
+            });
 
-        // Show thank you message
-        window.easeTransfer?.showToast('Thank you for your feedback!', 'success');
+            const result = await response.json();
 
-        // Reset form
-        this.selectedRating = 0;
-        this.stars.forEach(star => star.classList.remove('selected'));
-        if (this.feedbackText) this.feedbackText.value = '';
+            if (result.success) {
+                window.easeTransfer?.showToast('Thank you for your feedback! 🎉', 'success');
+                
+                // Reset form
+                this.selectedRating = 0;
+                this.stars.forEach(star => star.classList.remove('selected'));
+                if (this.feedbackText) this.feedbackText.value = '';
+            } else {
+                window.easeTransfer?.showToast('Failed to send feedback', 'error');
+            }
+        } catch (err) {
+            console.error('Feedback error:', err);
+            window.easeTransfer?.showToast('Failed to send feedback', 'error');
+        }
+
+        // Re-enable button
+        this.submitBtn.disabled = false;
+        this.submitBtn.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13"/>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+            Send Feedback
+        `;
     }
 }
 
