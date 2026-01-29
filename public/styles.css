@@ -1074,3 +1074,127 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-secondary);
 }
+
+/* Tagline */
+.tagline {
+    font-size: 14px;
+    color: var(--text-secondary);
+    font-weight: 400;
+    margin-top: 4px;
+    font-style: italic;
+}
+
+/* Footer */
+.app-footer {
+    padding: 32px 16px;
+    text-align: center;
+    border-top: 1px solid var(--border);
+    margin-top: auto;
+}
+
+.creator {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 24px;
+}
+
+.creator strong {
+    color: var(--accent);
+}
+
+/* Feedback Section */
+.feedback-section {
+    max-width: 320px;
+    margin: 0 auto;
+}
+
+.feedback-title {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 12px;
+}
+
+.star-rating {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.star {
+    font-size: 32px;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.star:hover,
+.star.hovered {
+    color: #ffc107;
+    transform: scale(1.1);
+}
+
+.star.selected {
+    color: #ffc107;
+}
+
+.feedback-input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    margin-bottom: 12px;
+}
+
+.feedback-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.feedback-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0,122,255,0.15);
+}
+
+.feedback-btn {
+    width: 100%;
+    padding: 14px 20px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: var(--transition);
+}
+
+.feedback-btn:hover {
+    background: var(--accent-hover);
+    transform: scale(1.02);
+}
+
+.feedback-btn:active {
+    transform: scale(0.98);
+}
+
+.feedback-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.feedback-btn svg {
+    width: 18px;
+    height: 18px;
+}

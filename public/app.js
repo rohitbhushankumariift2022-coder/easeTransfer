@@ -789,7 +789,77 @@ class EaseTransfer {
     }
 }
 
+// Star Rating & Feedback System
+class FeedbackSystem {
+    constructor() {
+        this.selectedRating = 0;
+        this.init();
+    }
+
+    init() {
+        this.stars = document.querySelectorAll('.star');
+        this.feedbackText = document.getElementById('feedbackText');
+        this.submitBtn = document.getElementById('submitFeedback');
+
+        if (!this.stars.length || !this.submitBtn) return;
+
+        this.stars.forEach(star => {
+            star.addEventListener('click', () => this.selectRating(parseInt(star.dataset.value)));
+            star.addEventListener('mouseenter', () => this.hoverRating(parseInt(star.dataset.value)));
+            star.addEventListener('mouseleave', () => this.resetHover());
+        });
+
+        this.submitBtn.addEventListener('click', () => this.submitFeedback());
+    }
+
+    selectRating(value) {
+        this.selectedRating = value;
+        this.stars.forEach(star => {
+            const starValue = parseInt(star.dataset.value);
+            star.classList.toggle('selected', starValue <= value);
+        });
+    }
+
+    hoverRating(value) {
+        this.stars.forEach(star => {
+            const starValue = parseInt(star.dataset.value);
+            star.classList.toggle('hovered', starValue <= value);
+        });
+    }
+
+    resetHover() {
+        this.stars.forEach(star => star.classList.remove('hovered'));
+    }
+
+    async submitFeedback() {
+        if (this.selectedRating === 0) {
+            window.easeTransfer?.showToast('Please select a star rating', 'error');
+            return;
+        }
+
+        const feedback = this.feedbackText?.value.trim() || '';
+        const subject = encodeURIComponent(`easeTransfer Feedback - ${this.selectedRating} Stars`);
+        const body = encodeURIComponent(
+            `Rating: ${this.selectedRating}/5 Stars\n\n` +
+            `Feedback:\n${feedback || 'No additional feedback provided'}\n\n` +
+            `---\nSent from easeTransfer`
+        );
+
+        // Open email client
+        window.location.href = `mailto:rohitbhushankumar.iift2022@gmail.com?subject=${subject}&body=${body}`;
+
+        // Show thank you message
+        window.easeTransfer?.showToast('Thank you for your feedback!', 'success');
+
+        // Reset form
+        this.selectedRating = 0;
+        this.stars.forEach(star => star.classList.remove('selected'));
+        if (this.feedbackText) this.feedbackText.value = '';
+    }
+}
+
 // Initialize the app
 document.addEventListener('DOMContentLoaded', () => {
     window.easeTransfer = new EaseTransfer();
+    window.feedbackSystem = new FeedbackSystem();
 });
