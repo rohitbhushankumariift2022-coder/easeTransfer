@@ -223,6 +223,32 @@ body {
     color: var(--text-tertiary);
 }
 
+/* Usage Counter */
+.usage-counter {
+    margin-top: 32px;
+    padding: 16px 20px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.usage-counter svg {
+    width: 20px;
+    height: 20px;
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+.usage-counter strong {
+    color: var(--accent);
+    font-weight: 600;
+}
+
 /* Session Code Display */
 .session-code {
     font-size: 18px !important;

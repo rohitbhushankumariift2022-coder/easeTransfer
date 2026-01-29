@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
+const fs = require('fs');
 const os = require('os');
 const QRCode = require('qrcode');
 const { v4: uuidv4 } = require('uuid');
@@ -11,6 +12,29 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, maxPayload: 100 * 1024 * 1024 }); // 100MB max
 
 const PORT = process.env.PORT || 3000;
+const STATS_FILE = path.join(__dirname, 'stats.json');
+
+// Load or initialize usage stats
+function loadStats() {
+    try {
+        if (fs.existsSync(STATS_FILE)) {
+            return JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
+        }
+    } catch (err) {
+        console.error('Error loading stats:', err);
+    }
+    return { totalUsers: 0, totalSessions: 0 };
+}
+
+function saveStats() {
+    try {
+        fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+    } catch (err) {
+        console.error('Error saving stats:', err);
+    }
+}
+
+const stats = loadStats();
 
 // Store sessions, devices, and files
 const sessions = new Map(); // sessionCode -> { devices: Map, files: Map, createdAt }
@@ -69,6 +93,14 @@ app.get('/api/info', (req, res) => {
         ip,
         port: PORT,
         url: `http://${ip}:${PORT}`
+    });
+});
+
+// Get usage stats
+app.get('/api/stats', (req, res) => {
+    res.json({
+        totalUsers: stats.totalUsers,
+        totalSessions: stats.totalSessions
     });
 });
 
@@ -168,6 +200,11 @@ function handleJsonMessage(ws, deviceId, message) {
             });
             deviceToSession.set(deviceId, sessionCode);
             
+            // Increment stats
+            stats.totalUsers++;
+            stats.totalSessions++;
+            saveStats();
+            
             ws.send(JSON.stringify({
                 type: 'session_created',
                 sessionCode,
@@ -201,6 +238,10 @@ function handleJsonMessage(ws, deviceId, message) {
                 connectedAt: new Date().toISOString()
             });
             deviceToSession.set(deviceId, sessionCode);
+            
+            // Increment user count
+            stats.totalUsers++;
+            saveStats();
             
             ws.send(JSON.stringify({
                 type: 'session_joined',

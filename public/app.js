@@ -20,6 +20,20 @@ class EaseTransfer {
         this.detectDeviceType();
         this.checkUrlForSession();
         this.connectWebSocket();
+        this.loadUsageStats();
+    }
+
+    async loadUsageStats() {
+        try {
+            const response = await fetch('/api/stats');
+            const data = await response.json();
+            const userCountEl = document.getElementById('userCount');
+            if (userCountEl) {
+                userCountEl.textContent = data.totalUsers.toLocaleString();
+            }
+        } catch (err) {
+            console.error('Failed to load usage stats:', err);
+        }
     }
 
     checkUrlForSession() {
