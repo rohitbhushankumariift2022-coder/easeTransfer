@@ -6,7 +6,6 @@ const fs = require('fs');
 const os = require('os');
 const QRCode = require('qrcode');
 const { v4: uuidv4 } = require('uuid');
-const nodemailer = require('nodemailer');
 
 const app = express();
 const server = http.createServer(app);
@@ -113,7 +112,7 @@ app.post('/api/feedback', async (req, res) => {
         return res.status(400).json({ error: 'Invalid rating' });
     }
     
-    // Store feedback locally as backup
+    // Store feedback locally
     const feedbackData = {
         rating,
         feedback: feedback || '',
@@ -134,47 +133,8 @@ app.post('/api/feedback', async (req, res) => {
     allFeedback.push(feedbackData);
     fs.writeFileSync(feedbackFile, JSON.stringify(allFeedback, null, 2));
     
-    // Send email
-    try {
-        const transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-                user: process.env.GMAIL_USER || 'rohitbhushankumar.iift2022@gmail.com',
-                pass: process.env.GMAIL_APP_PASSWORD
-            }
-        });
-        
-        const stars = '★'.repeat(rating) + '☆'.repeat(5 - rating);
-        
-        await transporter.sendMail({
-            from: '"easeTransfer Feedback" <noreply@easetransfer.com>',
-            to: 'rohitbhushankumar.iift2022@gmail.com',
-            subject: `easeTransfer Feedback - ${rating}/5 Stars ${stars}`,
-            html: `
-                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
-                    <h2 style="color: #007aff;">New Feedback Received!</h2>
-                    <div style="background: #f5f5f7; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                        <p style="font-size: 32px; margin: 0 0 10px 0;">${stars}</p>
-                        <p style="color: #666; margin: 0;"><strong>Rating:</strong> ${rating}/5 Stars</p>
-                    </div>
-                    ${feedback ? `
-                    <div style="background: #fff; border: 1px solid #e5e5e5; padding: 20px; border-radius: 12px;">
-                        <p style="color: #333; margin: 0;"><strong>Feedback:</strong></p>
-                        <p style="color: #666; margin: 10px 0 0 0;">${feedback}</p>
-                    </div>
-                    ` : '<p style="color: #999;">No additional feedback provided.</p>'}
-                    <p style="color: #999; font-size: 12px; margin-top: 20px;">Sent from easeTransfer at ${new Date().toLocaleString()}</p>
-                </div>
-            `
-        });
-        
-        console.log('Feedback email sent successfully');
-        res.json({ success: true, message: 'Feedback sent!' });
-    } catch (err) {
-        console.error('Email error:', err.message);
-        // Still return success since feedback is saved locally
-        res.json({ success: true, message: 'Feedback saved!', note: 'Email delivery pending' });
-    }
+    console.log(`Feedback received: ${rating}/5 stars`);
+    res.json({ success: true, message: 'Thank you for your feedback!' });
 });
 
 // Broadcast message to all devices in a session except excluded one
