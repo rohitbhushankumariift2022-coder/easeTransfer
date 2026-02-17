@@ -1,265 +1,87 @@
 // easeTransfer - Fast Local File Transfer
-// Authentication System
-class AuthSystem {
-    constructor() {
-        this.phone = null;
-        this.token = localStorage.getItem('authToken');
-        this.user = null;
-        this.resendTimer = null;
-        this.init();
-    }
 
-    init() {
-        this.setupElements();
-        this.setupEventListeners();
-        this.checkAuth();
-    }
-
-    setupElements() {
-        this.elements = {
-            authModal: document.getElementById('authModal'),
-            phoneStep: document.getElementById('phoneStep'),
-            otpStep: document.getElementById('otpStep'),
-            phoneInput: document.getElementById('phoneInput'),
-            sendOtpBtn: document.getElementById('sendOtpBtn'),
-            otpContainer: document.getElementById('otpContainer'),
-            verifyOtpBtn: document.getElementById('verifyOtpBtn'),
-            resendOtp: document.getElementById('resendOtp'),
-            resendTimer: document.getElementById('resendTimer'),
-            changeNumber: document.getElementById('changeNumber'),
-            sentToNumber: document.getElementById('sentToNumber')
-        };
-    }
-
-    setupEventListeners() {
-        this.elements.sendOtpBtn?.addEventListener('click', () => this.sendOtp());
-        this.elements.phoneInput?.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') this.sendOtp();
-        });
-        this.elements.phoneInput?.addEventListener('input', (e) => {
-            e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10);
-        });
-
-        this.elements.verifyOtpBtn?.addEventListener('click', () => this.verifyOtp());
-        this.elements.resendOtp?.addEventListener('click', () => this.resendOtpHandler());
-        this.elements.changeNumber?.addEventListener('click', () => this.showPhoneStep());
-
-        // OTP input handling
-        const otpInputs = this.elements.otpContainer?.querySelectorAll('.otp-input');
-        otpInputs?.forEach((input, index) => {
-            input.addEventListener('input', (e) => {
-                e.target.value = e.target.value.replace(/\D/g, '').slice(0, 1);
-                if (e.target.value && index < otpInputs.length - 1) {
-                    otpInputs[index + 1].focus();
-                }
-                if (this.getOtpValue().length === 6) {
-                    this.verifyOtp();
-                }
-            });
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Backspace' && !e.target.value && index > 0) {
-                    otpInputs[index - 1].focus();
-                }
-            });
-            input.addEventListener('paste', (e) => {
-                e.preventDefault();
-                const paste = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, 6);
-                paste.split('').forEach((char, i) => {
-                    if (otpInputs[i]) otpInputs[i].value = char;
-                });
-                if (paste.length === 6) this.verifyOtp();
-            });
-        });
-    }
-
-    async checkAuth() {
-        if (!this.token) {
-            this.showAuthModal();
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/auth/user', {
-                headers: { 'Authorization': `Bearer ${this.token}` }
-            });
-
-            if (response.ok) {
-                this.user = await response.json();
-                this.hideAuthModal();
-                window.subscriptionSystem?.updateUI(this.user);
-            } else {
-                localStorage.removeItem('authToken');
-                this.token = null;
-                this.showAuthModal();
-            }
-        } catch (err) {
-            console.error('Auth check failed:', err);
-            this.showAuthModal();
-        }
-    }
-
-    showAuthModal() {
-        this.elements.authModal?.classList.add('show');
-        this.elements.phoneInput?.focus();
-    }
-
-    hideAuthModal() {
-        this.elements.authModal?.classList.remove('show');
-    }
-
-    showPhoneStep() {
-        this.elements.phoneStep?.classList.remove('hidden');
-        this.elements.otpStep?.classList.add('hidden');
-        this.clearOtpInputs();
-        if (this.resendTimer) clearInterval(this.resendTimer);
-    }
-
-    showOtpStep() {
-        this.elements.phoneStep?.classList.add('hidden');
-        this.elements.otpStep?.classList.remove('hidden');
-        this.elements.sentToNumber.textContent = `+91 ${this.phone}`;
-        this.elements.otpContainer?.querySelector('.otp-input')?.focus();
-        this.startResendTimer();
-    }
-
-    getOtpValue() {
-        const inputs = this.elements.otpContainer?.querySelectorAll('.otp-input');
-        return Array.from(inputs || []).map(i => i.value).join('');
-    }
-
-    clearOtpInputs() {
-        this.elements.otpContainer?.querySelectorAll('.otp-input').forEach(i => i.value = '');
-    }
-
-    startResendTimer() {
-        let seconds = 30;
-        this.elements.resendOtp.disabled = true;
-        this.elements.resendTimer.textContent = `(${seconds}s)`;
-
-        this.resendTimer = setInterval(() => {
-            seconds--;
-            if (seconds <= 0) {
-                clearInterval(this.resendTimer);
-                this.elements.resendOtp.disabled = false;
-                this.elements.resendTimer.textContent = '';
-            } else {
-                this.elements.resendTimer.textContent = `(${seconds}s)`;
-            }
-        }, 1000);
-    }
-
-    async sendOtp() {
-        const phone = this.elements.phoneInput.value.trim();
-        
-        if (!/^[6-9]\d{9}$/.test(phone)) {
-            window.easeTransfer?.showToast('Please enter a valid 10-digit mobile number', 'error');
-            return;
-        }
-
-        this.phone = phone;
-        this.elements.sendOtpBtn.disabled = true;
-        this.elements.sendOtpBtn.innerHTML = '<span>Sending...</span>';
-
-        try {
-            const response = await fetch('/api/auth/send-otp', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone })
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                // Show OTP in toast when using console/test mode
-                if (data.testOtp) {
-                    window.easeTransfer?.showToast(`Test Mode - Your OTP: ${data.testOtp}`, 'info');
-                } else {
-                    window.easeTransfer?.showToast(`OTP sent via ${data.provider || 'SMS'}!`, 'success');
-                }
-                this.showOtpStep();
-            } else {
-                window.easeTransfer?.showToast(data.error || 'Failed to send OTP', 'error');
-            }
-        } catch (err) {
-            console.error('Send OTP error:', err);
-            window.easeTransfer?.showToast('Network error. Please try again.', 'error');
-        }
-
-        this.elements.sendOtpBtn.disabled = false;
-        this.elements.sendOtpBtn.innerHTML = '<span>Send OTP</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
-    }
-
-    async resendOtpHandler() {
-        if (this.elements.resendOtp.disabled) return;
-        await this.sendOtp();
-    }
-
-    async verifyOtp() {
-        const otp = this.getOtpValue();
-        
-        if (otp.length !== 6) {
-            window.easeTransfer?.showToast('Please enter the 6-digit OTP', 'error');
-            return;
-        }
-
-        this.elements.verifyOtpBtn.disabled = true;
-        this.elements.verifyOtpBtn.innerHTML = '<span>Verifying...</span>';
-
-        try {
-            const response = await fetch('/api/auth/verify-otp', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone: this.phone, otp })
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                this.token = data.token;
-                this.user = data.user;
-                localStorage.setItem('authToken', data.token);
-                
-                window.easeTransfer?.showToast(data.isNewUser ? 'Welcome to easeTransfer!' : 'Welcome back!', 'success');
-                this.hideAuthModal();
-                window.subscriptionSystem?.updateUI(data.user);
-            } else {
-                window.easeTransfer?.showToast(data.error || 'Invalid OTP', 'error');
-                this.clearOtpInputs();
-                this.elements.otpContainer?.querySelector('.otp-input')?.focus();
-            }
-        } catch (err) {
-            console.error('Verify OTP error:', err);
-            window.easeTransfer?.showToast('Network error. Please try again.', 'error');
-        }
-
-        this.elements.verifyOtpBtn.disabled = false;
-        this.elements.verifyOtpBtn.innerHTML = '<span>Verify & Continue</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
-    }
-
-    getToken() {
-        return this.token;
-    }
-
-    logout() {
-        localStorage.removeItem('authToken');
-        this.token = null;
-        this.user = null;
-        this.showAuthModal();
-    }
-}
-
-// Subscription System
+// Subscription System (Local storage based - no authentication required)
 class SubscriptionSystem {
     constructor() {
         this.currentPlan = 'free';
         this.transferCount = 0;
         this.transferLimit = 5;
+        this.planExpiry = null;
         this.init();
     }
 
     init() {
         this.setupElements();
         this.setupEventListeners();
+        this.loadFromLocalStorage();
+        this.updateUIFromLocal();
+    }
+
+    loadFromLocalStorage() {
+        try {
+            const stored = localStorage.getItem('easeTransferUser');
+            if (stored) {
+                const data = JSON.parse(stored);
+                this.currentPlan = data.plan || 'free';
+                this.transferCount = data.transferCount || 0;
+                this.planExpiry = data.planExpiry || null;
+                
+                // Check if plan has expired
+                if (this.planExpiry && new Date(this.planExpiry) < new Date()) {
+                    this.currentPlan = 'free';
+                    this.planExpiry = null;
+                }
+                
+                // Reset daily transfer count for free users
+                const today = new Date().toISOString().split('T')[0];
+                if (this.currentPlan === 'free' && data.transferResetDate !== today) {
+                    this.transferCount = 0;
+                    this.saveToLocalStorage(today);
+                }
+            }
+            
+            // Set transfer limit based on plan
+            const planLimits = {
+                free: 5,
+                premium: 100,
+                premium_plus: 500,
+                premium_pro: -1 // unlimited
+            };
+            this.transferLimit = planLimits[this.currentPlan] || 5;
+        } catch (err) {
+            console.error('Error loading user data:', err);
+        }
+    }
+
+    saveToLocalStorage(resetDate = null) {
+        try {
+            const data = {
+                plan: this.currentPlan,
+                transferCount: this.transferCount,
+                planExpiry: this.planExpiry,
+                transferResetDate: resetDate || new Date().toISOString().split('T')[0]
+            };
+            localStorage.setItem('easeTransferUser', JSON.stringify(data));
+        } catch (err) {
+            console.error('Error saving user data:', err);
+        }
+    }
+
+    updateUIFromLocal() {
+        let daysLeft = 0;
+        if (this.planExpiry) {
+            const expiry = new Date(this.planExpiry);
+            const now = new Date();
+            daysLeft = Math.max(0, Math.ceil((expiry - now) / (1000 * 60 * 60 * 24)));
+        }
+        
+        this.updateUI({
+            plan: this.currentPlan,
+            planName: this.getPlanName(this.currentPlan),
+            transferCount: this.transferCount,
+            transferLimit: this.transferLimit,
+            daysLeft: daysLeft
+        });
     }
 
     setupElements() {
@@ -340,46 +162,43 @@ class SubscriptionSystem {
     }
 
     async checkAndIncrementTransfer() {
-        const token = window.authSystem?.getToken();
-        if (!token) return { allowed: false };
-
-        try {
-            const response = await fetch('/api/transfer/increment', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                this.transferCount = data.transferCount;
-                this.updateUI({
-                    plan: this.currentPlan,
-                    planName: this.getPlanName(this.currentPlan),
-                    transferCount: data.transferCount,
-                    transferLimit: data.transferLimit,
-                    daysLeft: 0
-                });
-
-                if (data.limitReached) {
-                    this.showPremiumModal('You\'ve reached your transfer limit!');
-                    return { allowed: false, limitReached: true };
-                }
-
-                return { allowed: true };
-            } else if (data.limitReached) {
-                this.showPremiumModal('You\'ve reached your transfer limit!');
-                return { allowed: false, limitReached: true };
-            }
-
-            return { allowed: false };
-        } catch (err) {
-            console.error('Transfer check error:', err);
-            return { allowed: true }; // Allow on error to not block
+        // Check if limit reached (skip for unlimited plans)
+        if (this.transferLimit !== -1 && this.transferCount >= this.transferLimit) {
+            this.showPremiumModal('You\'ve reached your transfer limit!');
+            return { allowed: false, limitReached: true };
         }
+
+        // Increment count locally
+        this.transferCount++;
+        this.saveToLocalStorage();
+        this.updateUIFromLocal();
+
+        // Check if limit now reached
+        if (this.transferLimit !== -1 && this.transferCount >= this.transferLimit) {
+            return { allowed: true, limitReached: true };
+        }
+
+        return { allowed: true };
+    }
+
+    // Activate a premium plan (called after successful payment)
+    activatePlan(planId, durationDays) {
+        const planLimits = {
+            premium: 100,
+            premium_plus: 500,
+            premium_pro: -1
+        };
+        
+        this.currentPlan = planId;
+        this.transferLimit = planLimits[planId] || 5;
+        this.transferCount = 0;
+        
+        const expiry = new Date();
+        expiry.setDate(expiry.getDate() + durationDays);
+        this.planExpiry = expiry.toISOString();
+        
+        this.saveToLocalStorage();
+        this.updateUIFromLocal();
     }
 
     getPlanName(plan) {
@@ -511,39 +330,14 @@ class PaymentSystem {
             this.elements.paymentPlanName.textContent = plan.name;
         }
 
-        // Create payment order
-        await this.createOrder(planId);
+        // Generate a demo payment link
+        if (this.elements.paymentLinkUrl) {
+            this.elements.paymentLinkUrl.value = `https://pay.easetransfer.com/demo/${planId}`;
+        }
 
         // Close premium modal, open payment modal
         window.subscriptionSystem?.hidePremiumModal();
         this.showPaymentModal();
-    }
-
-    async createOrder(planId) {
-        const token = window.authSystem?.getToken();
-        if (!token) return;
-
-        try {
-            const response = await fetch('/api/payment/create', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ planId })
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                this.orderId = data.orderId;
-                if (this.elements.paymentLinkUrl) {
-                    this.elements.paymentLinkUrl.value = data.paymentLink;
-                }
-            }
-        } catch (err) {
-            console.error('Create order error:', err);
-        }
     }
 
     showPaymentModal() {
@@ -630,8 +424,7 @@ class PaymentSystem {
         this.elements.linkPayment?.classList.add('hidden');
         this.elements.paymentProcessing?.classList.remove('hidden');
 
-        const token = window.authSystem?.getToken();
-        if (!token || !this.orderId) {
+        if (!this.selectedPlan) {
             window.easeTransfer?.showToast('Payment error. Please try again.', 'error');
             this.showMethods();
             return;
@@ -641,23 +434,24 @@ class PaymentSystem {
             // Simulate payment processing (In production, use actual payment gateway)
             await new Promise(resolve => setTimeout(resolve, 2000));
 
-            const response = await fetch('/api/payment/simulate', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ orderId: this.orderId })
+            // Get plan duration
+            const planDurations = {
+                premium: 3,
+                premium_plus: 5,
+                premium_pro: 7
+            };
+            
+            const duration = planDurations[this.selectedPlan] || 3;
+            
+            // Activate plan locally
+            window.subscriptionSystem?.activatePlan(this.selectedPlan, duration);
+            
+            this.showSuccess({
+                plan: this.selectedPlan,
+                planName: window.subscriptionSystem?.getPlanName(this.selectedPlan) || 'Premium'
             });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                this.showSuccess(data.plan);
-            } else {
-                window.easeTransfer?.showToast(data.error || 'Payment failed', 'error');
-                this.showMethods();
-            }
+            
+            window.easeTransfer?.showToast('Payment successful! Plan activated.', 'success');
         } catch (err) {
             console.error('Payment error:', err);
             window.easeTransfer?.showToast('Payment failed. Please try again.', 'error');
@@ -1593,7 +1387,6 @@ class FeedbackSystem {
 
 // Initialize the app
 document.addEventListener('DOMContentLoaded', () => {
-    window.authSystem = new AuthSystem();
     window.subscriptionSystem = new SubscriptionSystem();
     window.paymentSystem = new PaymentSystem();
     window.easeTransfer = new EaseTransfer();

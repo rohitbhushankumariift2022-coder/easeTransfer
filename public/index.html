@@ -13,60 +13,6 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <!-- Auth Modal -->
-    <div class="auth-modal" id="authModal">
-        <div class="auth-container">
-            <div class="auth-header">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                    <path d="M2 17l10 5 10-5"/>
-                    <path d="M2 12l10 5 10-5"/>
-                </svg>
-                <h1>easeTransfer</h1>
-                <p>Sign in to continue</p>
-            </div>
-            
-            <!-- Phone Input Screen -->
-            <div class="auth-step" id="phoneStep">
-                <div class="input-group">
-                    <label>Mobile Number</label>
-                    <div class="phone-input-wrapper">
-                        <span class="country-code">+91</span>
-                        <input type="tel" id="phoneInput" placeholder="Enter 10-digit mobile number" maxlength="10" autocomplete="tel">
-                    </div>
-                </div>
-                <button class="auth-btn primary" id="sendOtpBtn">
-                    <span>Send OTP</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="5" y1="12" x2="19" y2="12"/>
-                        <polyline points="12 5 19 12 12 19"/>
-                    </svg>
-                </button>
-            </div>
-            
-            <!-- OTP Input Screen -->
-            <div class="auth-step hidden" id="otpStep">
-                <p class="otp-info">Enter the OTP sent to <span id="sentToNumber"></span></p>
-                <div class="otp-inputs" id="otpContainer">
-                    <input type="tel" class="otp-input" maxlength="1" data-index="0">
-                    <input type="tel" class="otp-input" maxlength="1" data-index="1">
-                    <input type="tel" class="otp-input" maxlength="1" data-index="2">
-                    <input type="tel" class="otp-input" maxlength="1" data-index="3">
-                    <input type="tel" class="otp-input" maxlength="1" data-index="4">
-                    <input type="tel" class="otp-input" maxlength="1" data-index="5">
-                </div>
-                <button class="auth-btn primary" id="verifyOtpBtn">
-                    <span>Verify & Continue</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                </button>
-                <button class="auth-btn-link" id="resendOtp">Resend OTP <span id="resendTimer"></span></button>
-                <button class="auth-btn-link" id="changeNumber">Change Number</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Premium Popup Modal -->
     <div class="premium-modal" id="premiumModal">
         <div class="premium-backdrop"></div>
