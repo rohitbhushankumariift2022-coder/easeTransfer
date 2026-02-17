@@ -1,4 +1,699 @@
 // easeTransfer - Fast Local File Transfer
+// Authentication System
+class AuthSystem {
+    constructor() {
+        this.phone = null;
+        this.token = localStorage.getItem('authToken');
+        this.user = null;
+        this.resendTimer = null;
+        this.init();
+    }
+
+    init() {
+        this.setupElements();
+        this.setupEventListeners();
+        this.checkAuth();
+    }
+
+    setupElements() {
+        this.elements = {
+            authModal: document.getElementById('authModal'),
+            phoneStep: document.getElementById('phoneStep'),
+            otpStep: document.getElementById('otpStep'),
+            phoneInput: document.getElementById('phoneInput'),
+            sendOtpBtn: document.getElementById('sendOtpBtn'),
+            otpContainer: document.getElementById('otpContainer'),
+            verifyOtpBtn: document.getElementById('verifyOtpBtn'),
+            resendOtp: document.getElementById('resendOtp'),
+            resendTimer: document.getElementById('resendTimer'),
+            changeNumber: document.getElementById('changeNumber'),
+            sentToNumber: document.getElementById('sentToNumber')
+        };
+    }
+
+    setupEventListeners() {
+        this.elements.sendOtpBtn?.addEventListener('click', () => this.sendOtp());
+        this.elements.phoneInput?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.sendOtp();
+        });
+        this.elements.phoneInput?.addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10);
+        });
+
+        this.elements.verifyOtpBtn?.addEventListener('click', () => this.verifyOtp());
+        this.elements.resendOtp?.addEventListener('click', () => this.resendOtpHandler());
+        this.elements.changeNumber?.addEventListener('click', () => this.showPhoneStep());
+
+        // OTP input handling
+        const otpInputs = this.elements.otpContainer?.querySelectorAll('.otp-input');
+        otpInputs?.forEach((input, index) => {
+            input.addEventListener('input', (e) => {
+                e.target.value = e.target.value.replace(/\D/g, '').slice(0, 1);
+                if (e.target.value && index < otpInputs.length - 1) {
+                    otpInputs[index + 1].focus();
+                }
+                if (this.getOtpValue().length === 6) {
+                    this.verifyOtp();
+                }
+            });
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Backspace' && !e.target.value && index > 0) {
+                    otpInputs[index - 1].focus();
+                }
+            });
+            input.addEventListener('paste', (e) => {
+                e.preventDefault();
+                const paste = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, 6);
+                paste.split('').forEach((char, i) => {
+                    if (otpInputs[i]) otpInputs[i].value = char;
+                });
+                if (paste.length === 6) this.verifyOtp();
+            });
+        });
+    }
+
+    async checkAuth() {
+        if (!this.token) {
+            this.showAuthModal();
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/auth/user', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+
+            if (response.ok) {
+                this.user = await response.json();
+                this.hideAuthModal();
+                window.subscriptionSystem?.updateUI(this.user);
+            } else {
+                localStorage.removeItem('authToken');
+                this.token = null;
+                this.showAuthModal();
+            }
+        } catch (err) {
+            console.error('Auth check failed:', err);
+            this.showAuthModal();
+        }
+    }
+
+    showAuthModal() {
+        this.elements.authModal?.classList.add('show');
+        this.elements.phoneInput?.focus();
+    }
+
+    hideAuthModal() {
+        this.elements.authModal?.classList.remove('show');
+    }
+
+    showPhoneStep() {
+        this.elements.phoneStep?.classList.remove('hidden');
+        this.elements.otpStep?.classList.add('hidden');
+        this.clearOtpInputs();
+        if (this.resendTimer) clearInterval(this.resendTimer);
+    }
+
+    showOtpStep() {
+        this.elements.phoneStep?.classList.add('hidden');
+        this.elements.otpStep?.classList.remove('hidden');
+        this.elements.sentToNumber.textContent = `+91 ${this.phone}`;
+        this.elements.otpContainer?.querySelector('.otp-input')?.focus();
+        this.startResendTimer();
+    }
+
+    getOtpValue() {
+        const inputs = this.elements.otpContainer?.querySelectorAll('.otp-input');
+        return Array.from(inputs || []).map(i => i.value).join('');
+    }
+
+    clearOtpInputs() {
+        this.elements.otpContainer?.querySelectorAll('.otp-input').forEach(i => i.value = '');
+    }
+
+    startResendTimer() {
+        let seconds = 30;
+        this.elements.resendOtp.disabled = true;
+        this.elements.resendTimer.textContent = `(${seconds}s)`;
+
+        this.resendTimer = setInterval(() => {
+            seconds--;
+            if (seconds <= 0) {
+                clearInterval(this.resendTimer);
+                this.elements.resendOtp.disabled = false;
+                this.elements.resendTimer.textContent = '';
+            } else {
+                this.elements.resendTimer.textContent = `(${seconds}s)`;
+            }
+        }, 1000);
+    }
+
+    async sendOtp() {
+        const phone = this.elements.phoneInput.value.trim();
+        
+        if (!/^[6-9]\d{9}$/.test(phone)) {
+            window.easeTransfer?.showToast('Please enter a valid 10-digit mobile number', 'error');
+            return;
+        }
+
+        this.phone = phone;
+        this.elements.sendOtpBtn.disabled = true;
+        this.elements.sendOtpBtn.innerHTML = '<span>Sending...</span>';
+
+        try {
+            const response = await fetch('/api/auth/send-otp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                // Show OTP in toast when using console/test mode
+                if (data.testOtp) {
+                    window.easeTransfer?.showToast(`Test Mode - Your OTP: ${data.testOtp}`, 'info');
+                } else {
+                    window.easeTransfer?.showToast(`OTP sent via ${data.provider || 'SMS'}!`, 'success');
+                }
+                this.showOtpStep();
+            } else {
+                window.easeTransfer?.showToast(data.error || 'Failed to send OTP', 'error');
+            }
+        } catch (err) {
+            console.error('Send OTP error:', err);
+            window.easeTransfer?.showToast('Network error. Please try again.', 'error');
+        }
+
+        this.elements.sendOtpBtn.disabled = false;
+        this.elements.sendOtpBtn.innerHTML = '<span>Send OTP</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
+    }
+
+    async resendOtpHandler() {
+        if (this.elements.resendOtp.disabled) return;
+        await this.sendOtp();
+    }
+
+    async verifyOtp() {
+        const otp = this.getOtpValue();
+        
+        if (otp.length !== 6) {
+            window.easeTransfer?.showToast('Please enter the 6-digit OTP', 'error');
+            return;
+        }
+
+        this.elements.verifyOtpBtn.disabled = true;
+        this.elements.verifyOtpBtn.innerHTML = '<span>Verifying...</span>';
+
+        try {
+            const response = await fetch('/api/auth/verify-otp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: this.phone, otp })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                this.token = data.token;
+                this.user = data.user;
+                localStorage.setItem('authToken', data.token);
+                
+                window.easeTransfer?.showToast(data.isNewUser ? 'Welcome to easeTransfer!' : 'Welcome back!', 'success');
+                this.hideAuthModal();
+                window.subscriptionSystem?.updateUI(data.user);
+            } else {
+                window.easeTransfer?.showToast(data.error || 'Invalid OTP', 'error');
+                this.clearOtpInputs();
+                this.elements.otpContainer?.querySelector('.otp-input')?.focus();
+            }
+        } catch (err) {
+            console.error('Verify OTP error:', err);
+            window.easeTransfer?.showToast('Network error. Please try again.', 'error');
+        }
+
+        this.elements.verifyOtpBtn.disabled = false;
+        this.elements.verifyOtpBtn.innerHTML = '<span>Verify & Continue</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+    }
+
+    getToken() {
+        return this.token;
+    }
+
+    logout() {
+        localStorage.removeItem('authToken');
+        this.token = null;
+        this.user = null;
+        this.showAuthModal();
+    }
+}
+
+// Subscription System
+class SubscriptionSystem {
+    constructor() {
+        this.currentPlan = 'free';
+        this.transferCount = 0;
+        this.transferLimit = 5;
+        this.init();
+    }
+
+    init() {
+        this.setupElements();
+        this.setupEventListeners();
+    }
+
+    setupElements() {
+        this.elements = {
+            transferCounter: document.getElementById('transferCounter'),
+            transferCount: document.getElementById('transferCount'),
+            transferLimit: document.getElementById('transferLimit'),
+            planBadge: document.getElementById('planBadge'),
+            daysLeft: document.getElementById('daysLeft'),
+            premiumModal: document.getElementById('premiumModal'),
+            premiumClose: document.getElementById('premiumClose'),
+            premiumReason: document.getElementById('premiumReason'),
+            upgradeBtn: document.getElementById('upgradeBtn')
+        };
+    }
+
+    setupEventListeners() {
+        this.elements.premiumClose?.addEventListener('click', () => this.hidePremiumModal());
+        document.querySelector('.premium-backdrop')?.addEventListener('click', () => this.hidePremiumModal());
+        this.elements.upgradeBtn?.addEventListener('click', () => this.showPremiumModal('Upgrade to unlock more transfers'));
+        
+        // Counter tooltip
+        this.elements.transferCounter?.addEventListener('click', () => {
+            if (this.currentPlan === 'free') {
+                this.showPremiumModal('Upgrade to unlock more transfers');
+            }
+        });
+    }
+
+    updateUI(user) {
+        if (!user) return;
+
+        this.currentPlan = user.plan;
+        this.transferCount = user.transferCount;
+        this.transferLimit = user.transferLimit;
+
+        // Update counter
+        if (this.elements.transferCount) {
+            this.elements.transferCount.textContent = this.transferCount;
+        }
+        if (this.elements.transferLimit) {
+            this.elements.transferLimit.textContent = this.transferLimit === -1 ? '∞' : this.transferLimit;
+        }
+
+        // Update plan badge
+        if (this.elements.planBadge) {
+            this.elements.planBadge.className = `plan-badge-small ${user.plan}`;
+            this.elements.planBadge.textContent = user.planName;
+        }
+
+        // Update days left
+        if (this.elements.daysLeft) {
+            if (user.daysLeft > 0) {
+                this.elements.daysLeft.textContent = `${user.daysLeft} days left`;
+            } else if (user.plan === 'free') {
+                this.elements.daysLeft.textContent = 'Upgrade for more';
+            } else {
+                this.elements.daysLeft.textContent = 'Plan active';
+            }
+        }
+
+        // Show/hide upgrade button
+        if (this.elements.upgradeBtn) {
+            this.elements.upgradeBtn.style.display = user.plan === 'free' ? 'flex' : 'none';
+        }
+
+        // Update counter color based on usage
+        if (this.elements.transferCounter && this.transferLimit !== -1) {
+            const usage = this.transferCount / this.transferLimit;
+            if (usage >= 1) {
+                this.elements.transferCounter.classList.add('limit-reached');
+            } else if (usage >= 0.8) {
+                this.elements.transferCounter.classList.add('limit-warning');
+            } else {
+                this.elements.transferCounter.classList.remove('limit-reached', 'limit-warning');
+            }
+        }
+    }
+
+    async checkAndIncrementTransfer() {
+        const token = window.authSystem?.getToken();
+        if (!token) return { allowed: false };
+
+        try {
+            const response = await fetch('/api/transfer/increment', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                this.transferCount = data.transferCount;
+                this.updateUI({
+                    plan: this.currentPlan,
+                    planName: this.getPlanName(this.currentPlan),
+                    transferCount: data.transferCount,
+                    transferLimit: data.transferLimit,
+                    daysLeft: 0
+                });
+
+                if (data.limitReached) {
+                    this.showPremiumModal('You\'ve reached your transfer limit!');
+                    return { allowed: false, limitReached: true };
+                }
+
+                return { allowed: true };
+            } else if (data.limitReached) {
+                this.showPremiumModal('You\'ve reached your transfer limit!');
+                return { allowed: false, limitReached: true };
+            }
+
+            return { allowed: false };
+        } catch (err) {
+            console.error('Transfer check error:', err);
+            return { allowed: true }; // Allow on error to not block
+        }
+    }
+
+    getPlanName(plan) {
+        const names = {
+            free: 'Free',
+            premium: 'Premium',
+            premium_plus: 'Premium Plus',
+            premium_pro: 'Premium Pro'
+        };
+        return names[plan] || 'Free';
+    }
+
+    showPremiumModal(reason = 'Upgrade to unlock more features') {
+        if (this.elements.premiumReason) {
+            this.elements.premiumReason.textContent = reason;
+        }
+        this.elements.premiumModal?.classList.add('show');
+        document.body.style.overflow = 'hidden';
+    }
+
+    hidePremiumModal() {
+        this.elements.premiumModal?.classList.remove('show');
+        document.body.style.overflow = '';
+    }
+
+    isLimitReached() {
+        return this.transferLimit !== -1 && this.transferCount >= this.transferLimit;
+    }
+}
+
+// Payment System
+class PaymentSystem {
+    constructor() {
+        this.selectedPlan = null;
+        this.orderId = null;
+        this.init();
+    }
+
+    init() {
+        this.setupElements();
+        this.setupEventListeners();
+    }
+
+    setupElements() {
+        this.elements = {
+            paymentModal: document.getElementById('paymentModal'),
+            paymentClose: document.getElementById('paymentClose'),
+            paymentAmount: document.getElementById('paymentAmount'),
+            paymentPlanName: document.getElementById('paymentPlanName'),
+            paymentMethods: document.querySelector('.payment-methods'),
+            upiPayment: document.getElementById('upiPayment'),
+            cardPayment: document.getElementById('cardPayment'),
+            linkPayment: document.getElementById('linkPayment'),
+            paymentProcessing: document.getElementById('paymentProcessing'),
+            paymentSuccess: document.getElementById('paymentSuccess'),
+            successPlanName: document.getElementById('successPlanName'),
+            upiIdInput: document.getElementById('upiIdInput'),
+            payUpiBtn: document.getElementById('payUpiBtn'),
+            payCardBtn: document.getElementById('payCardBtn'),
+            paymentLinkUrl: document.getElementById('paymentLinkUrl'),
+            copyPaymentLink: document.getElementById('copyPaymentLink'),
+            cardNumber: document.getElementById('cardNumber'),
+            cardExpiry: document.getElementById('cardExpiry'),
+            cardCvv: document.getElementById('cardCvv'),
+            cardName: document.getElementById('cardName')
+        };
+    }
+
+    setupEventListeners() {
+        this.elements.paymentClose?.addEventListener('click', () => this.closePayment());
+        document.querySelector('.payment-backdrop')?.addEventListener('click', () => this.closePayment());
+
+        // Payment method selection
+        document.querySelectorAll('.payment-method').forEach(method => {
+            method.addEventListener('click', () => {
+                const methodType = method.dataset.method;
+                this.showPaymentMethod(methodType);
+            });
+        });
+
+        // UPI payment
+        this.elements.payUpiBtn?.addEventListener('click', () => this.processUpiPayment());
+
+        // Card payment
+        this.elements.payCardBtn?.addEventListener('click', () => this.processCardPayment());
+
+        // Copy payment link
+        this.elements.copyPaymentLink?.addEventListener('click', () => this.copyPaymentLinkToClipboard());
+
+        // Card number formatting
+        this.elements.cardNumber?.addEventListener('input', (e) => {
+            let value = e.target.value.replace(/\D/g, '');
+            value = value.replace(/(\d{4})/g, '$1 ').trim();
+            e.target.value = value.slice(0, 19);
+        });
+
+        // Expiry formatting
+        this.elements.cardExpiry?.addEventListener('input', (e) => {
+            let value = e.target.value.replace(/\D/g, '');
+            if (value.length >= 2) {
+                value = value.slice(0, 2) + '/' + value.slice(2, 4);
+            }
+            e.target.value = value;
+        });
+
+        // CVV
+        this.elements.cardCvv?.addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/\D/g, '').slice(0, 3);
+        });
+    }
+
+    async selectPlan(planId) {
+        this.selectedPlan = planId;
+        
+        const plans = {
+            premium: { name: 'Premium', price: 99 },
+            premium_plus: { name: 'Premium Plus', price: 199 },
+            premium_pro: { name: 'Premium Pro', price: 299 }
+        };
+
+        const plan = plans[planId];
+        if (!plan) return;
+
+        // Update modal
+        if (this.elements.paymentAmount) {
+            this.elements.paymentAmount.textContent = `₹${plan.price}`;
+        }
+        if (this.elements.paymentPlanName) {
+            this.elements.paymentPlanName.textContent = plan.name;
+        }
+
+        // Create payment order
+        await this.createOrder(planId);
+
+        // Close premium modal, open payment modal
+        window.subscriptionSystem?.hidePremiumModal();
+        this.showPaymentModal();
+    }
+
+    async createOrder(planId) {
+        const token = window.authSystem?.getToken();
+        if (!token) return;
+
+        try {
+            const response = await fetch('/api/payment/create', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ planId })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                this.orderId = data.orderId;
+                if (this.elements.paymentLinkUrl) {
+                    this.elements.paymentLinkUrl.value = data.paymentLink;
+                }
+            }
+        } catch (err) {
+            console.error('Create order error:', err);
+        }
+    }
+
+    showPaymentModal() {
+        this.elements.paymentModal?.classList.add('show');
+        this.showMethods();
+        document.body.style.overflow = 'hidden';
+    }
+
+    closePayment() {
+        this.elements.paymentModal?.classList.remove('show');
+        document.body.style.overflow = '';
+        this.showMethods();
+    }
+
+    showMethods() {
+        this.elements.paymentMethods?.classList.remove('hidden');
+        this.elements.upiPayment?.classList.add('hidden');
+        this.elements.cardPayment?.classList.add('hidden');
+        this.elements.linkPayment?.classList.add('hidden');
+        this.elements.paymentProcessing?.classList.add('hidden');
+        this.elements.paymentSuccess?.classList.add('hidden');
+    }
+
+    showPaymentMethod(method) {
+        this.elements.paymentMethods?.classList.add('hidden');
+        this.elements.upiPayment?.classList.add('hidden');
+        this.elements.cardPayment?.classList.add('hidden');
+        this.elements.linkPayment?.classList.add('hidden');
+
+        switch (method) {
+            case 'upi':
+                this.elements.upiPayment?.classList.remove('hidden');
+                break;
+            case 'card':
+                this.elements.cardPayment?.classList.remove('hidden');
+                break;
+            case 'link':
+                this.elements.linkPayment?.classList.remove('hidden');
+                break;
+        }
+    }
+
+    async processUpiPayment() {
+        const upiId = this.elements.upiIdInput?.value.trim();
+        
+        if (!upiId || !upiId.includes('@')) {
+            window.easeTransfer?.showToast('Please enter a valid UPI ID', 'error');
+            return;
+        }
+
+        await this.processPayment();
+    }
+
+    async processCardPayment() {
+        const cardNumber = this.elements.cardNumber?.value.replace(/\s/g, '');
+        const expiry = this.elements.cardExpiry?.value;
+        const cvv = this.elements.cardCvv?.value;
+        const name = this.elements.cardName?.value.trim();
+
+        if (!cardNumber || cardNumber.length < 16) {
+            window.easeTransfer?.showToast('Please enter a valid card number', 'error');
+            return;
+        }
+        if (!expiry || expiry.length < 5) {
+            window.easeTransfer?.showToast('Please enter card expiry', 'error');
+            return;
+        }
+        if (!cvv || cvv.length < 3) {
+            window.easeTransfer?.showToast('Please enter CVV', 'error');
+            return;
+        }
+        if (!name) {
+            window.easeTransfer?.showToast('Please enter cardholder name', 'error');
+            return;
+        }
+
+        await this.processPayment();
+    }
+
+    async processPayment() {
+        // Show processing
+        this.elements.upiPayment?.classList.add('hidden');
+        this.elements.cardPayment?.classList.add('hidden');
+        this.elements.linkPayment?.classList.add('hidden');
+        this.elements.paymentProcessing?.classList.remove('hidden');
+
+        const token = window.authSystem?.getToken();
+        if (!token || !this.orderId) {
+            window.easeTransfer?.showToast('Payment error. Please try again.', 'error');
+            this.showMethods();
+            return;
+        }
+
+        try {
+            // Simulate payment processing (In production, use actual payment gateway)
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            const response = await fetch('/api/payment/simulate', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ orderId: this.orderId })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                this.showSuccess(data.plan);
+            } else {
+                window.easeTransfer?.showToast(data.error || 'Payment failed', 'error');
+                this.showMethods();
+            }
+        } catch (err) {
+            console.error('Payment error:', err);
+            window.easeTransfer?.showToast('Payment failed. Please try again.', 'error');
+            this.showMethods();
+        }
+    }
+
+    showSuccess(plan) {
+        this.elements.paymentProcessing?.classList.add('hidden');
+        this.elements.paymentSuccess?.classList.remove('hidden');
+        
+        if (this.elements.successPlanName) {
+            this.elements.successPlanName.textContent = plan.planName;
+        }
+
+        // Update subscription UI
+        window.subscriptionSystem?.updateUI(plan);
+    }
+
+    openPaymentLink() {
+        const link = this.elements.paymentLinkUrl?.value;
+        if (link) {
+            window.open(link, '_blank');
+        }
+    }
+
+    copyPaymentLinkToClipboard() {
+        const link = this.elements.paymentLinkUrl?.value;
+        if (link) {
+            navigator.clipboard.writeText(link).then(() => {
+                window.easeTransfer?.showToast('Payment link copied!', 'success');
+            });
+        }
+    }
+}
+
 class EaseTransfer {
     constructor() {
         this.ws = null;
@@ -441,6 +1136,15 @@ class EaseTransfer {
     async uploadFiles(fileList) {
         const files = Array.from(fileList);
         if (files.length === 0) return;
+
+        // Check transfer limit before uploading
+        const result = await window.subscriptionSystem?.checkAndIncrementTransfer();
+        if (result && !result.allowed) {
+            if (result.limitReached) {
+                this.showToast('Transfer limit reached. Please upgrade your plan.', 'error');
+            }
+            return;
+        }
 
         // Add to queue
         this.uploadQueue.push(...files);
@@ -889,6 +1593,9 @@ class FeedbackSystem {
 
 // Initialize the app
 document.addEventListener('DOMContentLoaded', () => {
+    window.authSystem = new AuthSystem();
+    window.subscriptionSystem = new SubscriptionSystem();
+    window.paymentSystem = new PaymentSystem();
     window.easeTransfer = new EaseTransfer();
     window.feedbackSystem = new FeedbackSystem();
 });

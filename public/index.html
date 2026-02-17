@@ -13,6 +13,284 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <!-- Auth Modal -->
+    <div class="auth-modal" id="authModal">
+        <div class="auth-container">
+            <div class="auth-header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5"/>
+                    <path d="M2 12l10 5 10-5"/>
+                </svg>
+                <h1>easeTransfer</h1>
+                <p>Sign in to continue</p>
+            </div>
+            
+            <!-- Phone Input Screen -->
+            <div class="auth-step" id="phoneStep">
+                <div class="input-group">
+                    <label>Mobile Number</label>
+                    <div class="phone-input-wrapper">
+                        <span class="country-code">+91</span>
+                        <input type="tel" id="phoneInput" placeholder="Enter 10-digit mobile number" maxlength="10" autocomplete="tel">
+                    </div>
+                </div>
+                <button class="auth-btn primary" id="sendOtpBtn">
+                    <span>Send OTP</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                        <polyline points="12 5 19 12 12 19"/>
+                    </svg>
+                </button>
+            </div>
+            
+            <!-- OTP Input Screen -->
+            <div class="auth-step hidden" id="otpStep">
+                <p class="otp-info">Enter the OTP sent to <span id="sentToNumber"></span></p>
+                <div class="otp-inputs" id="otpContainer">
+                    <input type="tel" class="otp-input" maxlength="1" data-index="0">
+                    <input type="tel" class="otp-input" maxlength="1" data-index="1">
+                    <input type="tel" class="otp-input" maxlength="1" data-index="2">
+                    <input type="tel" class="otp-input" maxlength="1" data-index="3">
+                    <input type="tel" class="otp-input" maxlength="1" data-index="4">
+                    <input type="tel" class="otp-input" maxlength="1" data-index="5">
+                </div>
+                <button class="auth-btn primary" id="verifyOtpBtn">
+                    <span>Verify & Continue</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                </button>
+                <button class="auth-btn-link" id="resendOtp">Resend OTP <span id="resendTimer"></span></button>
+                <button class="auth-btn-link" id="changeNumber">Change Number</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Premium Popup Modal -->
+    <div class="premium-modal" id="premiumModal">
+        <div class="premium-backdrop"></div>
+        <div class="premium-container">
+            <button class="premium-close" id="premiumClose">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+            <div class="premium-header">
+                <div class="premium-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                    </svg>
+                </div>
+                <h2>Upgrade to Premium</h2>
+                <p id="premiumReason">You've reached your transfer limit</p>
+            </div>
+            
+            <div class="plans-container">
+                <div class="plan-card" data-plan="premium">
+                    <div class="plan-badge">Popular</div>
+                    <h3>Premium</h3>
+                    <div class="plan-price">₹99<span>/3 days</span></div>
+                    <ul class="plan-features">
+                        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>100 file transfers</li>
+                        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>3-day access</li>
+                        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>1 Mbps speed</li>
+                    </ul>
+                    <button class="plan-btn" onclick="window.paymentSystem?.selectPlan('premium')">Select Plan</button>
+                </div>
+                
+                <div class="plan-card featured" data-plan="premium_plus">
+                    <div class="plan-badge">Best Value</div>
+                    <h3>Premium Plus</h3>
+                    <div class="plan-price">₹199<span>/5 days</span></div>
+                    <ul class="plan-features">
+                        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>500 file transfers</li>
+                        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>5-day access</li>
+                        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>10 Mbps speed</li>
+                    </ul>
+                    <button class="plan-btn" onclick="window.paymentSystem?.selectPlan('premium_plus')">Select Plan</button>
+                </div>
+                
+                <div class="plan-card" data-plan="premium_pro">
+                    <div class="plan-badge pro">Pro</div>
+                    <h3>Premium Pro</h3>
+                    <div class="plan-price">₹299<span>/7 days</span></div>
+                    <ul class="plan-features">
+                        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>Unlimited transfers</li>
+                        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>7-day access</li>
+                        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>50 Mbps speed</li>
+                    </ul>
+                    <button class="plan-btn" onclick="window.paymentSystem?.selectPlan('premium_pro')">Select Plan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Payment Modal -->
+    <div class="payment-modal" id="paymentModal">
+        <div class="payment-backdrop"></div>
+        <div class="payment-container">
+            <button class="payment-close" id="paymentClose">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+            
+            <div class="payment-header">
+                <h2>Complete Payment</h2>
+                <p>Pay <span id="paymentAmount">₹99</span> for <span id="paymentPlanName">Premium</span></p>
+            </div>
+            
+            <div class="payment-methods">
+                <div class="payment-method" data-method="upi">
+                    <div class="method-icon upi-icon">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                        </svg>
+                    </div>
+                    <div class="method-info">
+                        <h4>UPI</h4>
+                        <p>Pay using any UPI app</p>
+                    </div>
+                    <svg class="method-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="9 18 15 12 9 6"/>
+                    </svg>
+                </div>
+                
+                <div class="payment-method" data-method="card">
+                    <div class="method-icon card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+                            <line x1="1" y1="10" x2="23" y2="10"/>
+                        </svg>
+                    </div>
+                    <div class="method-info">
+                        <h4>Debit / Credit Card</h4>
+                        <p>Visa, Mastercard, RuPay</p>
+                    </div>
+                    <svg class="method-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="9 18 15 12 9 6"/>
+                    </svg>
+                </div>
+                
+                <div class="payment-method" data-method="link">
+                    <div class="method-icon link-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                        </svg>
+                    </div>
+                    <div class="method-info">
+                        <h4>Payment Link</h4>
+                        <p>Get a shareable payment link</p>
+                    </div>
+                    <svg class="method-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="9 18 15 12 9 6"/>
+                    </svg>
+                </div>
+            </div>
+            
+            <!-- UPI Payment -->
+            <div class="payment-step hidden" id="upiPayment">
+                <button class="back-btn" onclick="window.paymentSystem?.showMethods()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                    Back
+                </button>
+                <div class="upi-section">
+                    <label>Enter UPI ID</label>
+                    <input type="text" id="upiIdInput" placeholder="yourname@upi">
+                    <button class="pay-btn" id="payUpiBtn">Pay Now</button>
+                </div>
+                <div class="upi-or">OR</div>
+                <div class="qr-payment">
+                    <p>Scan QR Code to Pay</p>
+                    <div class="qr-placeholder" id="paymentQr"></div>
+                </div>
+            </div>
+            
+            <!-- Card Payment -->
+            <div class="payment-step hidden" id="cardPayment">
+                <button class="back-btn" onclick="window.paymentSystem?.showMethods()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                    Back
+                </button>
+                <div class="card-form">
+                    <div class="input-group">
+                        <label>Card Number</label>
+                        <input type="tel" id="cardNumber" placeholder="1234 5678 9012 3456" maxlength="19">
+                    </div>
+                    <div class="input-row">
+                        <div class="input-group">
+                            <label>Expiry</label>
+                            <input type="tel" id="cardExpiry" placeholder="MM/YY" maxlength="5">
+                        </div>
+                        <div class="input-group">
+                            <label>CVV</label>
+                            <input type="tel" id="cardCvv" placeholder="123" maxlength="3">
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label>Cardholder Name</label>
+                        <input type="text" id="cardName" placeholder="Name on card">
+                    </div>
+                    <button class="pay-btn" id="payCardBtn">Pay Now</button>
+                </div>
+            </div>
+            
+            <!-- Payment Link -->
+            <div class="payment-step hidden" id="linkPayment">
+                <button class="back-btn" onclick="window.paymentSystem?.showMethods()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                    Back
+                </button>
+                <div class="link-section">
+                    <div class="link-icon-large">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                    </div>
+                    <h3>Payment Link Generated!</h3>
+                    <div class="payment-link-box">
+                        <input type="text" id="paymentLinkUrl" readonly value="https://pay.easetransfer.com/...">
+                        <button class="copy-link-btn" id="copyPaymentLink">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2"/>
+                                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <p class="link-expires">Link expires in 24 hours</p>
+                    <button class="pay-btn" onclick="window.paymentSystem?.openPaymentLink()">Open Payment Page</button>
+                </div>
+            </div>
+            
+            <!-- Payment Processing -->
+            <div class="payment-step hidden" id="paymentProcessing">
+                <div class="processing-animation">
+                    <div class="spinner-large"></div>
+                    <h3>Processing Payment</h3>
+                    <p>Please do not close this window...</p>
+                </div>
+            </div>
+            
+            <!-- Payment Success -->
+            <div class="payment-step hidden" id="paymentSuccess">
+                <div class="success-animation">
+                    <div class="success-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                    </div>
+                    <h3>Payment Successful!</h3>
+                    <p>Your <span id="successPlanName">Premium</span> plan is now active</p>
+                    <button class="pay-btn" onclick="window.paymentSystem?.closePayment()">Start Transferring</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="app-container">
         <!-- Header -->
         <header class="header">
@@ -25,6 +303,19 @@
                 <span class="logo-text">easeTransfer</span>
             </div>
             <div class="header-right">
+                <!-- Transfer Counter -->
+                <div class="transfer-counter" id="transferCounter">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                        <polyline points="17,8 12,3 7,8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    <span id="transferCount">0</span>/<span id="transferLimit">5</span>
+                    <div class="counter-tooltip" id="counterTooltip">
+                        <span id="planBadge" class="plan-badge-small free">Free</span>
+                        <span id="daysLeft">Upgrade for more</span>
+                    </div>
+                </div>
                 <div class="connection-status" id="connectionStatus">
                     <span class="status-dot"></span>
                     <span class="status-text">Connecting</span>
@@ -221,6 +512,12 @@
 
         <!-- Footer -->
         <footer class="app-footer">
+            <button class="upgrade-btn" id="upgradeBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                </svg>
+                Upgrade Plan
+            </button>
             <p class="creator">A platform created by <strong>Rohit</strong></p>
             
             <div class="feedback-section">
