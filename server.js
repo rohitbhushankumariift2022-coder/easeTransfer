@@ -61,9 +61,16 @@ async function sendSMS(phone, otp) {
     }
 }
 
-// Fast2SMS - Free SMS for India (Using Quick Transactional route)
+// Fast2SMS - Free SMS for India
 async function sendFast2SMS(phone, otp, message) {
-    // Try Quick Transactional route first (works without verification)
+    console.log('[Fast2SMS] Attempting to send OTP to:', phone);
+    console.log('[Fast2SMS] API Key configured:', FAST2SMS_API_KEY ? 'Yes (length: ' + FAST2SMS_API_KEY.length + ')' : 'NO - MISSING!');
+    
+    if (!FAST2SMS_API_KEY || FAST2SMS_API_KEY === 'YOUR_FAST2SMS_API_KEY_HERE') {
+        throw new Error('Fast2SMS API key not configured');
+    }
+    
+    // Try DLT route first (requires template approval)
     const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
         method: 'POST',
         headers: {
@@ -71,19 +78,23 @@ async function sendFast2SMS(phone, otp, message) {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            route: 'q', // Quick transactional route
-            message: `Your easeTransfer OTP is ${otp}. Valid for 5 minutes.`,
+            route: 'dlt',
+            sender_id: 'FSTSMS',
+            message: '173257', // Fast2SMS default OTP template ID
+            variables_values: otp + '|5',
             flash: 0,
             numbers: phone
         })
     });
     
     const data = await response.json();
+    console.log('[Fast2SMS] Response:', JSON.stringify(data));
     
     if (data.return === true) {
-        console.log(`[Fast2SMS] OTP sent to ${phone}`);
+        console.log(`[Fast2SMS] OTP sent successfully to ${phone}`);
         return { success: true, provider: 'fast2sms', requestId: data.request_id };
     } else {
+        console.error('[Fast2SMS] Failed:', data.message);
         throw new Error(data.message || 'Fast2SMS failed');
     }
 }
@@ -212,6 +223,17 @@ function getLocalIP() {
     return 'localhost';
 }
 
+// Debug endpoint to check SMS configuration (remove in production)
+app.get('/api/debug/sms-config', (req, res) => {
+    res.json({
+        smsProvider: SMS_PROVIDER,
+        fast2smsConfigured: FAST2SMS_API_KEY && FAST2SMS_API_KEY !== 'YOUR_FAST2SMS_API_KEY_HERE',
+        apiKeyLength: FAST2SMS_API_KEY ? FAST2SMS_API_KEY.length : 0,
+        apiKeyPreview: FAST2SMS_API_KEY ? FAST2SMS_API_KEY.substring(0, 8) + '...' : 'NOT SET',
+        nodeEnv: process.env.NODE_ENV
+    });
+});
+
 // Generate QR code for a session
 app.get('/api/qrcode', async (req, res) => {
     const ip = getLocalIP();
@@ -281,13 +303,16 @@ app.post('/api/auth/send-otp', async (req, res) => {
     // Send OTP via configured SMS provider
     const smsResult = await sendSMS(phone, otp);
     
+    console.log('[OTP] Send result:', JSON.stringify(smsResult));
+    
     if (smsResult.success) {
         res.json({ 
             success: true, 
             message: 'OTP sent successfully',
             provider: smsResult.provider,
-            // For testing only: show OTP when using console provider
-            ...(smsResult.provider === 'console' && { testOtp: otp })
+            // Show OTP when using console provider OR when SMS failed and fell back
+            ...(smsResult.provider === 'console' && { testOtp: otp }),
+            ...(smsResult.fallback && { testOtp: otp, note: 'SMS provider failed, showing OTP for testing' })
         });
     } else {
         res.status(500).json({ error: 'Failed to send OTP. Please try again.' });
